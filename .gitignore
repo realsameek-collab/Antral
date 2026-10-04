@@ -31,6 +31,7 @@ secrets
 secrets.*
 service-account*.json
 *-service-account*.json
+**/*serviceAccount*.json
 **/.aws/credentials
 **/.ssh/
 

@@ -1,0 +1,38 @@
+# Local environment files and secrets (matches in every directory)
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+.npmrc
+!.npmrc.example
+.pypirc
+.netrc
+
+# Private keys, certificates, and keystores
+*.pem
+*.key
+*.p12
+*.pfx
+*.p7b
+*.p7c
+*.p8
+*.jks
+*.keystore
+id_rsa
+id_rsa_*
+id_ed25519
+id_ed25519_*
+
+# Common cloud credentials and secret files
+credentials
+credentials.*
+secrets
+secrets.*
+service-account*.json
+*-service-account*.json
+**/.aws/credentials
+**/.ssh/
+
+# Dependencies and generated files
+node_modules/

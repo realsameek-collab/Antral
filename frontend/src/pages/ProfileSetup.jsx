@@ -1,15 +1,18 @@
 import { useState } from 'react'
-import { saveProfile } from '../../utils/emailAuth.js'
+import { useDispatch, useSelector } from 'react-redux'
 import AntralLogo from '../components/AntralLogo.jsx'
+import { saveUserProfile } from '../store/profileSlice.js'
 
 const today = new Date().toISOString().slice(0, 10)
 
-function ProfileSetup({ user, loadingError, onRetry, onComplete }) {
+function ProfileSetup({ loadingError, onRetry }) {
+  const dispatch = useDispatch()
+  const profileError = useSelector((state) => state.profile.error)
+  const profileStatus = useSelector((state) => state.profile.status)
   const [step, setStep] = useState('name')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [dateOfBirth, setDateOfBirth] = useState('')
-  const [pending, setPending] = useState(false)
   const [error, setError] = useState('')
 
   const handleNameSubmit = (event) => {
@@ -25,19 +28,11 @@ function ProfileSetup({ user, loadingError, onRetry, onComplete }) {
   const handleProfileSubmit = async (event) => {
     event.preventDefault()
     setError('')
-    setPending(true)
-    try {
-      const { profile } = await saveProfile(await user.getIdToken(), {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        dateOfBirth,
-      })
-      onComplete(profile)
-    } catch (saveError) {
-      setError(saveError.message)
-    } finally {
-      setPending(false)
-    }
+    dispatch(saveUserProfile({
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      dateOfBirth,
+    }))
   }
 
   const inputClass =
@@ -112,7 +107,7 @@ function ProfileSetup({ user, loadingError, onRetry, onComplete }) {
                       className={inputClass}
                     />
                   </div>
-                  {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+                  {(error || profileError) && <p role="alert" className="text-sm text-red-300">{error || profileError}</p>}
                   <button
                     type="submit"
                     className="h-12 w-full rounded-lg bg-white text-sm font-medium text-[#08080b] transition hover:bg-neutral-200"
@@ -147,18 +142,18 @@ function ProfileSetup({ user, loadingError, onRetry, onComplete }) {
                       className={`${inputClass} [color-scheme:dark]`}
                     />
                   </div>
-                  {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+                  {(error || profileError) && <p role="alert" className="text-sm text-red-300">{error || profileError}</p>}
                   <button
                     type="submit"
-                    disabled={pending}
+                    disabled={profileStatus === 'saving'}
                     className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-white text-sm font-medium text-[#08080b] transition hover:bg-neutral-200 disabled:cursor-wait disabled:opacity-60"
                   >
-                    {pending && <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900/25 border-t-neutral-900" aria-hidden="true" />}
-                    {pending ? 'Saving…' : 'Finish'}
+                    {profileStatus === 'saving' && <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-900/25 border-t-neutral-900" aria-hidden="true" />}
+                    {profileStatus === 'saving' ? 'Saving…' : 'Finish'}
                   </button>
                   <button
                     type="button"
-                    disabled={pending}
+                    disabled={profileStatus === 'saving'}
                     onClick={() => {
                       setError('')
                       setStep('name')

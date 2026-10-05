@@ -1,9 +1,8 @@
+import "dotenv/config";
 import express from "express";
-import dotenv from "dotenv"
 import connectDb from "./config/db.js"
+import { redis } from "./config/redis.js"
 import authRoutes from "./routes/auth.routes.js"
-
-dotenv.config()
 
 const port = process.env.PORT
 
@@ -22,7 +21,18 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: "Something went wrong. Please try again." })
 })
 
-app.listen(port , ()=>{
-    console.log(`server started at ${port}`)
-    connectDb()
+const start = async () => {
+    if (!process.env.REDIS_URL) {
+        throw new Error("REDIS_URL is not set. Cannot start the auth service.")
+    }
+    await redis.connect()
+    await connectDb()
+    app.listen(port, () => {
+        console.log(`server started at ${port}`)
+    })
+}
+
+start().catch((error) => {
+    console.error("Failed to start auth service:", error.message)
+    process.exitCode = 1
 })

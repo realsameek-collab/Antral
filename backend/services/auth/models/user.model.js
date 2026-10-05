@@ -16,6 +16,22 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
+    firstName: {
+      type: String,
+      trim: true,
+    },
+
+    lastName: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    dateOfBirth: {
+      type: String,
+      trim: true,
+    },
+
     email: {
       type: String,
       required: true,
@@ -33,8 +49,8 @@ const userSchema = new mongoose.Schema(
 
     provider: {
       type: String,
-      enum: ["google"],
-      default: "google",
+      enum: ["google", "github", "email"],
+      default: "email",
     },
 
     status: {

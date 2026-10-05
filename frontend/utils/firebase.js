@@ -1,10 +1,12 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { GoogleAuthProvider } from "firebase/auth";
-import { GithubAuthProvider } from "firebase/auth";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import {
+  initializeAuth,
+  inMemoryPersistence,
+  browserPopupRedirectResolver,
+  GoogleAuthProvider,
+  GithubAuthProvider,
+} from "firebase/auth";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -26,7 +28,16 @@ if (missingConfig.length > 0) {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+
+// In-memory persistence: the session is dropped on page reload, so the
+// login page shows again. Swap to browserLocalPersistence to keep users signed in.
+const auth = initializeAuth(app, {
+  persistence: inMemoryPersistence,
+  popupRedirectResolver: browserPopupRedirectResolver,
+});
+
 const googleProvider = new GoogleAuthProvider();
 const githubProvider = new GithubAuthProvider();
-export { auth, googleProvider };
+githubProvider.addScope("user:email");
+
+export { auth, googleProvider, githubProvider };

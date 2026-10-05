@@ -7,7 +7,8 @@ const port = process.env.PORT
 
 const app = express()
 
-app.use("/auth" , proxy(process.env.AUTH_SERVICE_URL))
+app.use("/auth" , proxy(process.env.AUTH_SERVICE_URL || process.env.AUTH_SERVICE))
+app.use("/agent" , proxy(process.env.AGENT_SERVICE_URL || process.env.AGENT_SERVICE))
 app.get("/",(req,res)=>{
     res.json({message:"Hello from gateway"})
 })

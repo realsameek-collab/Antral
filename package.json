@@ -1,0 +1,14 @@
+{
+  "name": "ai-security",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Antral — agentic security team. Root launcher for all services.",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n gateway,auth,project,agent,web -c cyan,green,yellow,magenta,blue \"npm --prefix backend/gateway run dev\" \"npm --prefix backend/services/auth run dev\" \"npm --prefix backend/services/project run dev\" \"npm --prefix backend/services/agent run dev\" \"npm --prefix frontend run dev\"",
+    "dev:backend": "concurrently -k -n gateway,auth,project,agent -c cyan,green,yellow,magenta \"npm --prefix backend/gateway run dev\" \"npm --prefix backend/services/auth run dev\" \"npm --prefix backend/services/project run dev\" \"npm --prefix backend/services/agent run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

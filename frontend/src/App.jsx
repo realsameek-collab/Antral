@@ -5,9 +5,11 @@ import { auth } from '../utils/firebase.js'
 import { endSession } from '../utils/emailAuth.js'
 import { clearProfile, loadProfile } from './store/profileSlice.js'
 import { setAuthUser } from './store/authSlice.js'
+import { clearConsent } from './store/consentSlice.js'
 import Login from './pages/Login.jsx'
 import Home from './pages/Home.jsx'
 import ProfileSetup from './pages/ProfileSetup.jsx'
+import ConsentGate from './components/ConsentGate.jsx'
 
 function App() {
   const dispatch = useDispatch()
@@ -31,6 +33,7 @@ function App() {
 
       if (!currentUser) {
         dispatch(clearProfile())
+        dispatch(clearConsent())
         if (sessionStarted.current) {
           sessionStarted.current = false
           endSession().catch((error) => console.error('Failed to end login session:', error))
@@ -71,7 +74,11 @@ function App() {
     return <ProfileSetup loadingError={profileError} onRetry={retryProfile} />
   }
 
-  return <Home profile={profile} />
+  return (
+    <ConsentGate>
+      <Home profile={profile} />
+    </ConsentGate>
+  )
 }
 
 export default App

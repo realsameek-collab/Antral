@@ -12,6 +12,7 @@ import {
   deleteConversation,
 } from "../lib/agent/memory.js";
 import { limitsFor } from "../lib/agent/limits.js";
+import { validateAttachments } from "../lib/agent/imageAttachments.js";
 
 const MAX_TASK_CHARS = 4000;
 const ACTIVE_STATUSES = ["running", "awaiting_approval"];
@@ -25,7 +26,9 @@ export const getTools = (_req, res) => {
 // Sits behind requireAccountConsent + requireTargetAuthorization.
 export const createRun = async (req, res, next) => {
   try {
-    const task = typeof req.body?.task === "string" ? req.body.task.trim() : "";
+    const attachments = validateAttachments(req.body?.attachments);
+    const submittedTask = typeof req.body?.task === "string" ? req.body.task.trim() : "";
+    const task = submittedTask || (attachments.length ? "Please describe the attached image(s)." : "");
     if (!task || task.length > MAX_TASK_CHARS) {
       return res.status(400).json({ message: `Describe the task in 1–${MAX_TASK_CHARS} characters.` });
     }
@@ -55,6 +58,7 @@ export const createRun = async (req, res, next) => {
       authorization: req.authorization,
       target: req.target,
       task,
+      attachments,
       disabledScopes: req.accountConsent?.disabledCapabilities || [],
       conversationId,
     });

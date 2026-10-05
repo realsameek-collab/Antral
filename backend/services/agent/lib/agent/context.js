@@ -13,15 +13,19 @@ const KEEP_FULL_TOOL_RESULTS = 4;
 const SUMMARY_INPUT_CHARS_PER_MESSAGE = 2_000;
 
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
+const textContent = (content) =>
+  Array.isArray(content)
+    ? content.map((part) => (part.type === "image_url" ? "[attached image]" : part.text || "")).join(" ")
+    : content || "";
 
 const serialize = (messages) =>
   messages
     .map((m) => {
-      if (m.role === "tool") return `[tool result] ${clip(m.content || "", SUMMARY_INPUT_CHARS_PER_MESSAGE)}`;
+      if (m.role === "tool") return `[tool result] ${clip(textContent(m.content), SUMMARY_INPUT_CHARS_PER_MESSAGE)}`;
       const calls = (m.tool_calls || [])
         .map((c) => `[called ${c.function?.name}(${clip(c.function?.arguments || "", 400)})]`)
         .join(" ");
-      return `[${m.role}] ${clip(m.content || "", SUMMARY_INPUT_CHARS_PER_MESSAGE)} ${calls}`.trim();
+      return `[${m.role}] ${clip(textContent(m.content), SUMMARY_INPUT_CHARS_PER_MESSAGE)} ${calls}`.trim();
     })
     .join("\n");
 
@@ -107,7 +111,9 @@ export const fitContext = async (messages, limits, { signal } = {}) => {
   for (const i of order) {
     if (estimateTokens(out) <= budget) break;
     const c = out[i].content || "";
-    if (c.length > 2_000) out[i].content = `${c.slice(0, 2_000)}\n[truncated to fit the context window]`;
+    if (typeof c === "string" && c.length > 2_000) {
+      out[i].content = `${c.slice(0, 2_000)}\n[truncated to fit the context window]`;
+    }
   }
   return { messages: out, compacted: "Truncated large messages to fit the context window." };
 };

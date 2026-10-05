@@ -9,7 +9,6 @@ import { clearConsent } from './store/consentSlice.js'
 import Login from './pages/Login.jsx'
 import Home from './pages/Home.jsx'
 import ProfileSetup from './pages/ProfileSetup.jsx'
-import ConsentGate from './components/ConsentGate.jsx'
 
 function App() {
   const dispatch = useDispatch()
@@ -74,11 +73,10 @@ function App() {
     return <ProfileSetup loadingError={profileError} onRetry={retryProfile} />
   }
 
-  return (
-    <ConsentGate>
-      <Home profile={profile} />
-    </ConsentGate>
-  )
+  // Policies and permissions are handled inside the app (Settings), not as a
+  // wall in front of it. The agent service still refuses every run until the
+  // policies are accepted and a target is authorized.
+  return <Home profile={profile} />
 }
 
 export default App

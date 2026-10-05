@@ -1,155 +1,110 @@
-// Minimal Markdown renderer for agent answers: headings, paragraphs, lists,
-// tables, fenced code, inline code, bold and links. Builds React elements only
-// (no innerHTML), so model output can't inject markup or scripts.
+import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
+import remarkGfm from 'remark-gfm'
+import 'highlight.js/styles/github-dark.css'
 
-function inline(text, keyBase = '') {
-  const parts = []
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\((https?:\/\/[^)\s]+)\))/g
-  let last = 0
-  let m
-  let i = 0
-  while ((m = re.exec(text))) {
-    if (m.index > last) parts.push(text.slice(last, m.index))
-    const tok = m[0]
-    const key = `${keyBase}-${i++}`
-    if (tok.startsWith('`')) {
-      parts.push(
-        <code key={key} className="rounded bg-white/10 px-1 py-0.5 font-mono text-[0.85em] text-indigo-200">
-          {tok.slice(1, -1)}
-        </code>,
-      )
-    } else if (tok.startsWith('**')) {
-      parts.push(<strong key={key} className="font-semibold text-white">{tok.slice(2, -2)}</strong>)
-    } else {
-      const label = /^\[([^\]]+)\]/.exec(tok)[1]
-      parts.push(
-        <a key={key} href={m[2]} target="_blank" rel="noreferrer noopener" className="text-indigo-300 underline">
-          {label}
-        </a>,
-      )
-    }
-    last = m.index + tok.length
-  }
-  if (last < text.length) parts.push(text.slice(last))
-  return parts
+function plainText(node) {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(plainText).join('')
+  if (node && typeof node === 'object' && 'props' in node) return plainText(node.props.children)
+  return ''
 }
 
-const cells = (row) =>
-  row
-    .trim()
-    .replace(/^\||\|$/g, '')
-    .split('|')
-    .map((c) => c.trim())
+function CodeBlock({ children }) {
+  const [copyState, setCopyState] = useState('Copy')
+  const resetTimer = useRef(null)
+  const codeElement = Array.isArray(children) ? children.find((child) => child?.type === 'code') : children
+  const code = plainText(codeElement?.props?.children ?? children).replace(/\n$/, '')
+  const language = /language-([\w-]+)/.exec(codeElement?.props?.className || '')?.[1]
 
-function Markdown({ text }) {
-  const lines = String(text || '').replace(/\r\n/g, '\n').split('\n')
-  const blocks = []
-  let i = 0
+  useEffect(() => () => clearTimeout(resetTimer.current), [])
 
-  while (i < lines.length) {
-    const line = lines[i]
-    const key = `b${i}`
-
-    if (/^```/.test(line)) {
-      const body = []
-      i += 1
-      while (i < lines.length && !/^```/.test(lines[i])) body.push(lines[i++])
-      i += 1
-      blocks.push(
-        <pre key={key} className="overflow-x-auto rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs text-neutral-200">
-          {body.join('\n')}
-        </pre>,
-      )
-      continue
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopyState('Copied')
+    } catch {
+      setCopyState('Copy failed')
     }
-
-    const h = /^(#{1,4})\s+(.*)/.exec(line)
-    if (h) {
-      const size = ['text-lg', 'text-base', 'text-sm', 'text-sm'][h[1].length - 1]
-      blocks.push(
-        <p key={key} className={`${size} mt-2 font-semibold text-white`}>
-          {inline(h[2], key)}
-        </p>,
-      )
-      i += 1
-      continue
-    }
-
-    if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] || '')) {
-      const head = cells(line)
-      i += 2
-      const rows = []
-      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(cells(lines[i++]))
-      blocks.push(
-        <div key={key} className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs">
-            <thead>
-              <tr>
-                {head.map((c, j) => (
-                  <th key={j} className="border-b border-white/15 px-2 py-1.5 font-semibold text-white">
-                    {inline(c, `${key}h${j}`)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, ri) => (
-                <tr key={ri} className="align-top">
-                  {r.map((c, j) => (
-                    <td key={j} className="border-b border-white/5 px-2 py-1.5 text-neutral-300">
-                      {inline(c.replace(/<br\s*\/?>/gi, ' '), `${key}r${ri}c${j}`)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>,
-      )
-      continue
-    }
-
-    if (/^\s*([-*•]|\d+\.)\s+/.test(line)) {
-      const ordered = /^\s*\d+\./.test(line)
-      const items = []
-      while (i < lines.length && /^\s*([-*•]|\d+\.)\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*([-*•]|\d+\.)\s+/, ''))
-        i += 1
-      }
-      const List = ordered ? 'ol' : 'ul'
-      blocks.push(
-        <List key={key} className={`${ordered ? 'list-decimal' : 'list-disc'} space-y-1 pl-5 text-neutral-300`}>
-          {items.map((it, j) => (
-            <li key={j}>{inline(it, `${key}l${j}`)}</li>
-          ))}
-        </List>,
-      )
-      continue
-    }
-
-    if (!line.trim() || /^\s*(---|\*\*\*)\s*$/.test(line)) {
-      i += 1
-      continue
-    }
-
-    const para = []
-    while (
-      i < lines.length &&
-      lines[i].trim() &&
-      !/^(```|#{1,4}\s|\s*([-*•]|\d+\.)\s+|\s*\|.*\|\s*$)/.test(lines[i])
-    ) {
-      para.push(lines[i++])
-    }
-    // A line that only looked like a table row: show it as text, and always advance.
-    if (!para.length) para.push(lines[i++])
-    blocks.push(
-      <p key={key} className="text-neutral-300">
-        {inline(para.join(' '), key)}
-      </p>,
-    )
+    clearTimeout(resetTimer.current)
+    resetTimer.current = setTimeout(() => setCopyState('Copy'), 1800)
   }
 
-  return <div className="space-y-2 text-sm leading-relaxed">{blocks}</div>
+  return (
+    <div className="my-5 min-w-0 overflow-hidden rounded-xl border border-white/10 bg-[#101114]">
+      <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-2">
+        <span className="min-w-0 truncate text-[11px] font-medium text-neutral-500">
+          {language || 'Code'}
+        </span>
+        <button
+          type="button"
+          onClick={copyCode}
+          className="shrink-0 rounded-md px-2 py-1 text-[11px] text-neutral-400 transition hover:bg-white/[0.07] hover:text-white"
+          aria-label="Copy code"
+        >
+          {copyState}
+        </button>
+      </div>
+      <pre className="max-w-full overflow-x-auto px-4 py-3 text-[13px] leading-6">
+        {children}
+      </pre>
+    </div>
+  )
+}
+
+const components = {
+  h1: ({ children }) => <h1 className="mt-7 text-2xl font-semibold tracking-tight text-white first:mt-0">{children}</h1>,
+  h2: ({ children }) => <h2 className="mt-7 text-xl font-semibold tracking-tight text-white first:mt-0">{children}</h2>,
+  h3: ({ children }) => <h3 className="mt-6 text-lg font-semibold text-white first:mt-0">{children}</h3>,
+  h4: ({ children }) => <h4 className="mt-5 text-base font-semibold text-white first:mt-0">{children}</h4>,
+  p: ({ children }) => <p className="my-4 break-words leading-7 text-neutral-300 first:mt-0 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="my-4 list-disc space-y-2 pl-6 leading-7 text-neutral-300">{children}</ul>,
+  ol: ({ children }) => <ol className="my-4 list-decimal space-y-2 pl-6 leading-7 text-neutral-300">{children}</ol>,
+  li: ({ children }) => <li className="ps-1 marker:text-neutral-500">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold text-neutral-100">{children}</strong>,
+  em: ({ children }) => <em className="italic text-neutral-200">{children}</em>,
+  code: ({ className, children, ...props }) => (
+    <code
+      className={`${className || ''} rounded bg-white/[0.08] px-1.5 py-0.5 font-mono text-[0.88em] text-indigo-200`}
+      {...props}
+    >
+      {children}
+    </code>
+  ),
+  pre: CodeBlock,
+  blockquote: ({ children }) => (
+    <blockquote className="my-5 border-l-2 border-indigo-400/50 pl-4 text-neutral-400 [&>p]:my-2">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-7 border-white/10" />,
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noreferrer noopener" className="text-indigo-300 underline decoration-indigo-300/40 underline-offset-4 hover:text-indigo-200">
+      {children}
+    </a>
+  ),
+  table: ({ children }) => (
+    <div className="my-5 max-w-full overflow-x-auto rounded-lg border border-white/10">
+      <table className="w-full min-w-max border-collapse text-left text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-white/[0.04] text-neutral-100">{children}</thead>,
+  th: ({ children }) => <th className="border-b border-white/10 px-3 py-2 font-medium">{children}</th>,
+  td: ({ children }) => <td className="border-b border-white/[0.06] px-3 py-2 align-top text-neutral-300">{children}</td>,
+  input: ({ checked, ...props }) => (
+    <input type="checkbox" checked={checked} readOnly className="mr-2 accent-indigo-400" {...props} />
+  ),
+}
+
+function Markdown({ text }) {
+  return (
+    <div className="markdown-content min-w-0 max-w-full text-[15px] leading-7">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={components}>
+        {String(text || '')}
+      </ReactMarkdown>
+    </div>
+  )
 }
 
 export default Markdown

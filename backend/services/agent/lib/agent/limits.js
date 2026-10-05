@@ -43,7 +43,14 @@ export const limitsFor = (agent = "orchestrator") => {
 // Rough token estimate for chat messages.
 export const estimateTokens = (messages) =>
   messages.reduce((sum, m) => {
-    const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
+    const content = Array.isArray(m.content)
+      ? m.content.reduce(
+          (tokens, part) => tokens + (part.type === "image_url" ? 2_048 : (part.text || "").length / 4),
+          0,
+        )
+      : typeof m.content === "string"
+        ? m.content
+        : JSON.stringify(m.content ?? "");
     const calls = m.tool_calls ? JSON.stringify(m.tool_calls) : "";
-    return sum + Math.ceil((content.length + calls.length) / 4) + 4;
+    return sum + (Array.isArray(m.content) ? Math.ceil(content + calls.length / 4) : Math.ceil((content.length + calls.length) / 4)) + 4;
   }, 0);

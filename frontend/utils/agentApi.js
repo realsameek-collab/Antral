@@ -2,8 +2,8 @@
 // approvals and conversation memory.
 import { request } from "./consentApi.js";
 
-export const startRun = ({ target, task, conversationId }) =>
-  request("/agent/runs", { method: "POST", body: { target, task, conversationId } });
+export const startRun = ({ target, task, conversationId, attachments }) =>
+  request("/agent/runs", { method: "POST", body: { target, task, conversationId, attachments } });
 
 export const listRuns = () => request("/agent/runs");
 
@@ -23,3 +23,10 @@ export const deleteConversation = (id) => request(`/agent/conversations/${id}`, 
 export const getTools = () => request("/agent/tools");
 
 export const getLimits = () => request("/agent/limits");
+
+export const listApprovals = () => request("/agent/approvals");
+
+export const getAlwaysAllow = (authorizationId) => request(`/agent/targets/${authorizationId}/always-allow`);
+
+export const removeAlwaysAllow = (authorizationId, rule) =>
+  request(`/agent/targets/${authorizationId}/always-allow`, { method: "DELETE", body: rule ? { rule } : {} });

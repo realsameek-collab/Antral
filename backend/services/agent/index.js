@@ -19,7 +19,10 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: "64kb" }));
+app.use((req, res, next) => {
+  const isRunRequest = req.method === "POST" && /(?:^|\/)runs$/.test(req.path);
+  express.json({ limit: isRunRequest ? "21mb" : "64kb" })(req, res, next);
+});
 
 app.get("/", (_req, res) => {
   res.json({ message: "Hello from agent" });
@@ -29,6 +32,12 @@ app.use(consentRoutes);
 app.use(agentRoutes);
 
 app.use((err, _req, res, _next) => {
+  if (err.type === "entity.too.large") {
+    return res.status(413).json({ message: "The request is too large. Attach images totaling no more than 15 MB." });
+  }
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({ message: "The request body is invalid. Please try again." });
+  }
   console.error(err);
   res.status(500).json({ message: "Something went wrong. Please try again." });
 });

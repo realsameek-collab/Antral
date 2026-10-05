@@ -6,5 +6,6 @@ import "./memory.js";
 import "./github.js";
 import "./dependencies.js";
 import "./web.js";
+import "./permissions.js";
 
 export * from "./registry.js";

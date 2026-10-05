@@ -9,27 +9,36 @@ const PROVIDERS = {
     baseURL: "https://api.groq.com/openai/v1",
     keyEnv: "GROQ_API_KEY",
     defaultModel: "openai/gpt-oss-120b",
+    defaultVisionModel: "qwen/qwen3.8-27b",
   },
   gemini: {
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
     keyEnv: "GEMINI_API_KEY",
     defaultModel: "gemini-2.5-flash",
+    defaultVisionModel: "gemini-2.5-flash",
   },
   openrouter: {
     baseURL: "https://openrouter.ai/api/v1",
     keyEnv: "OPENROUTER_API_KEY",
     defaultModel: "openai/gpt-oss-120b",
+    defaultVisionModel: "google/gemini-2.5-flash",
   },
 };
 
-export const resolveProvider = () => {
+export const resolveProvider = ({ vision = false } = {}) => {
   const wanted = (process.env.LLM_PROVIDER || "").trim().toLowerCase();
   const name = wanted || Object.keys(PROVIDERS).find((p) => process.env[PROVIDERS[p].keyEnv]);
   const provider = PROVIDERS[name];
   if (!provider) throw new Error("No LLM provider configured. Set GROQ_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY.");
   const apiKey = process.env[provider.keyEnv];
   if (!apiKey) throw new Error(`LLM provider "${name}" is selected but ${provider.keyEnv} is not set.`);
-  return { name, ...provider, apiKey, model: process.env.LLM_MODEL || provider.defaultModel };
+  const model = vision
+    ? process.env.LLM_VISION_MODEL || provider.defaultVisionModel
+    : process.env.LLM_MODEL || provider.defaultModel;
+  if (!model) {
+    throw new Error(`No vision model is configured for "${name}". Set LLM_VISION_MODEL to a model that supports image input.`);
+  }
+  return { name, ...provider, apiKey, model };
 };
 
 // Converts registry tools to the OpenAI function-tool format.
@@ -87,7 +96,12 @@ export const chat = async (args) => {
 };
 
 const chatOnce = async ({ messages, tools = [], signal, maxTokens }) => {
-  const provider = resolveProvider();
+  const hasImageInput = messages.some(
+    (message) =>
+      Array.isArray(message.content) &&
+      message.content.some((part) => part.type === "image_url"),
+  );
+  const provider = resolveProvider({ vision: hasImageInput });
   try {
     const { data } = await axios.post(
       `${provider.baseURL}/chat/completions`,

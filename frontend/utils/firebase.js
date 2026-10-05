@@ -2,7 +2,7 @@
 import { initializeApp } from "firebase/app";
 import {
   initializeAuth,
-  inMemoryPersistence,
+  browserLocalPersistence,
   browserPopupRedirectResolver,
   GoogleAuthProvider,
   GithubAuthProvider,
@@ -29,12 +29,10 @@ if (missingConfig.length > 0) {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// In-memory persistence: the session is dropped on page reload, so the
-// login page shows again. Swap to browserLocalPersistence to keep users signed in.
 const auth = initializeAuth(app, {
-  persistence: inMemoryPersistence,
+  persistence: browserLocalPersistence,
   popupRedirectResolver: browserPopupRedirectResolver,
-});
+})
 
 const googleProvider = new GoogleAuthProvider();
 const githubProvider = new GithubAuthProvider();

@@ -1,4 +1,11 @@
-# React + Vite
+# Antral
+
+## Launch the desktop app
+
+From the repository root, run `npm run desktop`. This starts the local services
+and opens Antral in a native desktop window.
+
+For browser-based frontend development, run `npm run dev` from this directory.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

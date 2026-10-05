@@ -7,6 +7,7 @@ import {
   updateTargetScopes as updateTargetScopesApi,
   revokeTargetAuthorization as revokeTargetApi,
   setDisabledCapabilities as setDisabledCapabilitiesApi,
+  withdrawAccountConsent,
 } from '../../utils/consentApi.js'
 
 const getErrorMessage = (error) =>
@@ -19,6 +20,31 @@ export const loadConsent = createAsyncThunk(
     try {
       const [policies, status] = await Promise.all([getPolicies(), getConsentStatus()])
       return { policies, status }
+    } catch (error) {
+      return rejectWithValue(getErrorMessage(error))
+    }
+  },
+)
+
+// Re-read consent state without the loading flag, e.g. after the agent changed
+// a permission from chat, so open views update in place.
+export const refreshConsent = createAsyncThunk(
+  'consent/refresh',
+  async (_arg, { rejectWithValue }) => {
+    try {
+      return await getConsentStatus()
+    } catch (error) {
+      return rejectWithValue(getErrorMessage(error))
+    }
+  },
+)
+
+export const withdrawAccount = createAsyncThunk(
+  'consent/withdrawAccount',
+  async (_arg, { rejectWithValue }) => {
+    try {
+      await withdrawAccountConsent()
+      return await getConsentStatus()
     } catch (error) {
       return rejectWithValue(getErrorMessage(error))
     }
@@ -52,12 +78,13 @@ export const authorizeTarget = createAsyncThunk(
 
 export const updateTargetScopes = createAsyncThunk(
   'consent/updateTargetScopes',
-  async ({ id, scopes }, { rejectWithValue }) => {
+  async ({ id, scopes }, { getState, rejectWithValue }) => {
+    const previous = getState().consent.authorizations.find((a) => a.id === id)?.scopes
     try {
       const { authorization } = await updateTargetScopesApi(id, scopes)
       return authorization
     } catch (error) {
-      return rejectWithValue(getErrorMessage(error))
+      return rejectWithValue({ message: getErrorMessage(error), previous })
     }
   },
 )
@@ -77,12 +104,13 @@ export const revokeTarget = createAsyncThunk(
 // Turn a capability off (or back on) account-wide. `disabled` is the full list.
 export const setDisabledCapabilities = createAsyncThunk(
   'consent/setDisabledCapabilities',
-  async (disabled, { rejectWithValue }) => {
+  async (disabled, { getState, rejectWithValue }) => {
+    const previous = getState().consent.account?.disabledCapabilities || []
     try {
       const res = await setDisabledCapabilitiesApi(disabled)
       return res.disabledCapabilities
     } catch (error) {
-      return rejectWithValue(getErrorMessage(error))
+      return rejectWithValue({ message: getErrorMessage(error), previous })
     }
   },
 )
@@ -94,6 +122,7 @@ const initialState = {
   status: 'idle', // idle | loading | ready | error
   error: null,
   accepting: false,
+  withdrawing: false,
 }
 
 const consentSlice = createSlice({
@@ -133,11 +162,34 @@ const consentSlice = createSlice({
         state.accepting = false
         state.error = action.payload || 'Could not record your acceptance.'
       })
+      .addCase(refreshConsent.fulfilled, (state, action) => {
+        state.account = action.payload.account
+        state.authorizations = action.payload.authorizations
+      })
+      .addCase(withdrawAccount.pending, (state) => {
+        state.withdrawing = true
+      })
+      .addCase(withdrawAccount.fulfilled, (state, action) => {
+        state.withdrawing = false
+        state.account = action.payload.account
+        state.authorizations = action.payload.authorizations
+      })
+      .addCase(withdrawAccount.rejected, (state) => {
+        state.withdrawing = false
+      })
       .addCase(authorizeTarget.fulfilled, (state, action) => {
         state.authorizations = [
           action.payload,
           ...state.authorizations.filter((a) => a.id !== action.payload.id),
         ]
+      })
+      .addCase(updateTargetScopes.pending, (state, action) => {
+        const target = state.authorizations.find((a) => a.id === action.meta.arg.id)
+        if (target) target.scopes = action.meta.arg.scopes
+      })
+      .addCase(updateTargetScopes.rejected, (state, action) => {
+        const target = state.authorizations.find((a) => a.id === action.meta.arg.id)
+        if (target && action.payload?.previous) target.scopes = action.payload.previous
       })
       .addCase(updateTargetScopes.fulfilled, (state, action) => {
         state.authorizations = state.authorizations.map((a) =>
@@ -155,7 +207,8 @@ const consentSlice = createSlice({
         if (state.account) state.account.disabledCapabilities = action.payload
       })
       .addCase(setDisabledCapabilities.rejected, (state, action) => {
-        state.error = action.payload || 'Could not update capabilities.'
+        // Roll the optimistic toggle back; the caller shows the error.
+        if (state.account && action.payload?.previous) state.account.disabledCapabilities = action.payload.previous
       })
   },
 })

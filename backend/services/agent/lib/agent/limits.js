@@ -21,13 +21,26 @@ const AGENT_LIMITS = {
   orchestrator: {},
 };
 
+// Hard per-request caps of some providers. Groq's free tier rejects any single
+// request above 8,000 tokens per minute, and it counts max_tokens toward that,
+// so the 32k default fails mid-run with "Request too large". These caps apply
+// unless the matching AGENT_* env var is set (e.g. after upgrading the tier).
+const PROVIDER_LIMITS = {
+  groq: {
+    contextTokens: 7_000,
+    historyTokens: 2_000,
+    maxOutputTokens: 1_536,
+  },
+};
+
 const envInt = (name) => {
   const n = Number.parseInt(process.env[name] ?? "", 10);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 
-export const limitsFor = (agent = "orchestrator") => {
+export const limitsFor = (agent = "orchestrator", provider) => {
   const merged = { ...AGENT_LIMITS.default, ...(AGENT_LIMITS[agent] || {}) };
+  for (const [k, cap] of Object.entries(PROVIDER_LIMITS[provider] || {})) merged[k] = Math.min(merged[k], cap);
   const overrides = {
     contextTokens: envInt("AGENT_CONTEXT_TOKENS"),
     historyTokens: envInt("AGENT_HISTORY_TOKENS"),

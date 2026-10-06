@@ -65,8 +65,9 @@ const tailStart = (messages, keep, minIndex) => {
 
 // Returns { messages, compacted } where compacted is a short description of
 // what was done (for the audit log), or null if nothing was needed.
-export const fitContext = async (messages, limits, { signal } = {}) => {
-  const budget = limits.contextTokens - limits.maxOutputTokens;
+// `reservedTokens` covers what is sent besides the messages (tool schemas).
+export const fitContext = async (messages, limits, { signal, reservedTokens = 0 } = {}) => {
+  const budget = limits.contextTokens - limits.maxOutputTokens - reservedTokens;
   if (estimateTokens(messages) <= budget) return { messages, compacted: null };
 
   // Everything up to and including the task message is kept as-is (history is

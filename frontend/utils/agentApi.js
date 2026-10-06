@@ -30,3 +30,6 @@ export const getAlwaysAllow = (authorizationId) => request(`/agent/targets/${aut
 
 export const removeAlwaysAllow = (authorizationId, rule) =>
   request(`/agent/targets/${authorizationId}/always-allow`, { method: "DELETE", body: rule ? { rule } : {} });
+
+// Deletes a project: revokes its authorization and forgets all of its chats.
+export const deleteProject = (authorizationId) => request(`/agent/projects/${authorizationId}`, { method: "DELETE" });

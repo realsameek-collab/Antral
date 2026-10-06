@@ -1,45 +1,77 @@
 import axios from "axios";
+import { estimateTokens } from "./limits.js";
 
 // Provider-agnostic chat client. Groq, Gemini and OpenRouter all expose an
 // OpenAI-compatible /chat/completions endpoint with tool calling, so one
-// adapter covers them. Pick with LLM_PROVIDER (and optionally LLM_MODEL);
-// otherwise the first provider with an API key configured is used.
+// adapter covers them. LLM_PROVIDER (and optionally LLM_MODEL) picks the
+// preferred one; otherwise the first provider with an API key is preferred.
+//
+// Every configured provider is a fallback: if the preferred one is rate
+// limited, out of quota, overloaded or down, the same request goes straight to
+// the next one, and the failed provider is skipped until it should be usable
+// again. The switch is silent; the run just continues.
 const PROVIDERS = {
   groq: {
     baseURL: "https://api.groq.com/openai/v1",
     keyEnv: "GROQ_API_KEY",
     defaultModel: "openai/gpt-oss-120b",
     defaultVisionModel: "qwen/qwen3.8-27b",
+    // Free tier rejects any single request above 8,000 tokens (max_tokens included).
+    maxRequestTokens: 8_000,
   },
   gemini: {
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai",
     keyEnv: "GEMINI_API_KEY",
-    defaultModel: "gemini-2.5-flash",
-    defaultVisionModel: "gemini-2.5-flash",
+    defaultModel: "gemini-3.8-flash",
+    defaultVisionModel: "gemini-3.8-flash",
   },
   openrouter: {
     baseURL: "https://openrouter.ai/api/v1",
     keyEnv: "OPENROUTER_API_KEY",
     defaultModel: "openai/gpt-oss-120b",
-    defaultVisionModel: "google/gemini-2.5-flash",
+    defaultVisionModel: "google/gemini-3.8-flash",
   },
 };
 
-export const resolveProvider = ({ vision = false } = {}) => {
-  const wanted = (process.env.LLM_PROVIDER || "").trim().toLowerCase();
-  const name = wanted || Object.keys(PROVIDERS).find((p) => process.env[PROVIDERS[p].keyEnv]);
+// Provider name → time (ms) before which it is skipped after a failure.
+const coolingUntil = new Map();
+
+const configuredNames = () => Object.keys(PROVIDERS).filter((p) => process.env[PROVIDERS[p].keyEnv]);
+
+const preferredName = () => (process.env.LLM_PROVIDER || "").trim().toLowerCase() || configuredNames()[0];
+
+// LLM_MODEL / LLM_VISION_MODEL name a model of the preferred provider, so
+// fallbacks always use their own defaults.
+const describe = (name, { vision }) => {
   const provider = PROVIDERS[name];
-  if (!provider) throw new Error("No LLM provider configured. Set GROQ_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY.");
-  const apiKey = process.env[provider.keyEnv];
-  if (!apiKey) throw new Error(`LLM provider "${name}" is selected but ${provider.keyEnv} is not set.`);
+  const own = name === preferredName();
   const model = vision
-    ? process.env.LLM_VISION_MODEL || provider.defaultVisionModel
-    : process.env.LLM_MODEL || provider.defaultModel;
-  if (!model) {
-    throw new Error(`No vision model is configured for "${name}". Set LLM_VISION_MODEL to a model that supports image input.`);
-  }
-  return { name, ...provider, apiKey, model };
+    ? (own && process.env.LLM_VISION_MODEL) || provider.defaultVisionModel
+    : (own && process.env.LLM_MODEL) || provider.defaultModel;
+  return { name, ...provider, apiKey: process.env[provider.keyEnv], model };
 };
+
+// Preferred provider first, then the other configured ones. Providers cooling
+// down after a failure go last, soonest-available first, so a request is
+// never refused just because every provider failed recently.
+const providerChain = ({ vision = false } = {}) => {
+  const preferred = preferredName();
+  if (preferred && !PROVIDERS[preferred]) throw new Error(`Unknown LLM provider "${preferred}".`);
+  if (preferred && !process.env[PROVIDERS[preferred].keyEnv]) {
+    throw new Error(`LLM provider "${preferred}" is selected but ${PROVIDERS[preferred].keyEnv} is not set.`);
+  }
+  const names = [preferred, ...configuredNames().filter((n) => n !== preferred)].filter(Boolean);
+  if (!names.length) throw new Error("No LLM provider configured. Set GROQ_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY.");
+  const now = Date.now();
+  const ready = names.filter((n) => (coolingUntil.get(n) || 0) <= now);
+  const cooling = names
+    .filter((n) => (coolingUntil.get(n) || 0) > now)
+    .sort((a, b) => coolingUntil.get(a) - coolingUntil.get(b));
+  return [...ready, ...cooling].map((n) => describe(n, { vision }));
+};
+
+// The provider the next request will go to first.
+export const resolveProvider = ({ vision = false } = {}) => providerChain({ vision })[0];
 
 // Converts registry tools to the OpenAI function-tool format.
 export const toToolSchemas = (tools) =>
@@ -50,20 +82,44 @@ export const toToolSchemas = (tools) =>
 
 const MAX_RETRIES = 4;
 const MAX_WAIT_MS = 90_000;
+// While another provider is available, only retry the same one if it asks to
+// wait this little; otherwise move on at once.
+const QUICK_RETRY_MS = 2_000;
+
+// The provider's error text. Gemini wraps its error body in an array.
+const providerMessage = (error) => {
+  const data = error.response?.data;
+  return (Array.isArray(data) ? data[0] : data)?.error?.message || "";
+};
 
 // How long to wait before retrying a rate-limited or overloaded request:
 // the Retry-After header, the "try again in 24.9s" hint, or backoff.
 const retryDelayMs = (error, attempt) => {
   const header = Number(error.response?.headers?.["retry-after"]);
   if (Number.isFinite(header) && header > 0) return header * 1000;
-  const hint = /try again in (?:(\d+)m)?([\d.]+)s/i.exec(error.response?.data?.error?.message || "");
+  const hint = /try again in (?:(\d+)m)?([\d.]+)s/i.exec(providerMessage(error));
   if (hint) return (Number(hint[1] || 0) * 60 + Number(hint[2])) * 1000 + 500;
-  return 2_000 * 2 ** attempt;
+  return 1_000 * 2 ** attempt;
 };
 
 const isRetryable = (error) => {
   const status = error.response?.status;
-  return status === 429 || status === 503 || status === 502 || error.code === "ECONNRESET";
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || error.code === "ECONNRESET";
+};
+
+// The request was bigger than the provider accepts in one go (Groq answers
+// 413 "Request too large ... tokens per minute"). Waiting never helps; the
+// caller has to send less.
+export const isTooLarge = (error) =>
+  error.response?.status === 413 ||
+  /request too large|context length|maximum context|too many tokens/i.test(providerMessage(error));
+
+// How long to skip a provider after it failed.
+const cooldownMs = (error) => {
+  const status = error.response?.status;
+  if (status === 401 || status === 403 || status === 404) return 30 * 60_000; // bad key or model
+  if (isRetryable(error)) return Math.min(Math.max(retryDelayMs(error, 0), 30_000), 60 * 60_000);
+  return 60_000;
 };
 
 const sleep = (ms, signal) =>
@@ -79,35 +135,69 @@ const sleep = (ms, signal) =>
     );
   });
 
-// One model turn. Returns the assistant message ({ content, tool_calls? }).
-// Rate limits and temporary provider errors are retried with backoff.
+const hasImages = (messages) =>
+  messages.some((m) => Array.isArray(m.content) && m.content.some((part) => part.type === "image_url"));
+
+// One model turn. Returns { message, usage, provider, model }. Fails over to
+// the next provider instead of waiting; only the last one left is retried
+// patiently.
 export const chat = async (args) => {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await chatOnce(args);
-    } catch (error) {
-      const wait = isRetryable(error) ? retryDelayMs(error, attempt) : 0;
-      if (!wait || attempt >= MAX_RETRIES || wait > MAX_WAIT_MS || args.signal?.aborted) {
-        throw error;
+  const { messages, tools = [], maxTokens = 0, signal } = args;
+  const chain = providerChain({ vision: hasImages(messages) });
+  const needed = estimateTokens(messages) + Math.ceil(JSON.stringify(tools).length / 4) + maxTokens;
+  const fits = chain.filter((p) => !p.maxRequestTokens || needed <= p.maxRequestTokens);
+  const candidates = fits.length ? fits : chain;
+
+  let lastError;
+  for (const [index, provider] of candidates.entries()) {
+    const last = index === candidates.length - 1;
+    for (let attempt = 0; ; attempt += 1) {
+      if (signal?.aborted) throw new Error("cancelled");
+      try {
+        const result = await chatOnce(provider, args);
+        coolingUntil.delete(provider.name);
+        return result;
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        lastError = error;
+        const wait = isRetryable(error) ? retryDelayMs(error, attempt) : Infinity;
+        const canRetry = last ? attempt < MAX_RETRIES && wait <= MAX_WAIT_MS : attempt === 0 && wait <= QUICK_RETRY_MS;
+        if (canRetry) {
+          await sleep(wait, signal);
+          continue;
+        }
+        if (!isTooLarge(error)) coolingUntil.set(provider.name, Date.now() + cooldownMs(error));
+        break;
       }
-      await sleep(wait, args.signal);
     }
   }
+  throw lastError;
 };
 
-const chatOnce = async ({ messages, tools = [], signal, maxTokens }) => {
-  const hasImageInput = messages.some(
-    (message) =>
-      Array.isArray(message.content) &&
-      message.content.some((part) => part.type === "image_url"),
-  );
-  const provider = resolveProvider({ vision: hasImageInput });
+// Gemini 3 requires a thought signature on every tool call it is shown. Calls
+// made by another provider (after a failover) have none, so they get Google's
+// documented placeholder; other providers get the calls without the field.
+const SKIP_SIGNATURE = { google: { thought_signature: "skip_thought_signature_validator" } };
+const messagesFor = (providerName, messages) =>
+  messages.map((m) => {
+    if (!m.tool_calls?.length) return m;
+    return {
+      ...m,
+      tool_calls: m.tool_calls.map(({ extra_content, ...call }) =>
+        providerName === "gemini"
+          ? { ...call, extra_content: extra_content?.google?.thought_signature ? extra_content : SKIP_SIGNATURE }
+          : call,
+      ),
+    };
+  });
+
+const chatOnce = async (provider, { messages, tools = [], signal, maxTokens }) => {
   try {
     const { data } = await axios.post(
       `${provider.baseURL}/chat/completions`,
       {
         model: provider.model,
-        messages,
+        messages: messagesFor(provider.name, messages),
         ...(tools.length ? { tools, tool_choice: "auto" } : {}),
         temperature: 0.2,
         ...(maxTokens ? { max_tokens: maxTokens } : {}),
@@ -124,7 +214,7 @@ const chatOnce = async ({ messages, tools = [], signal, maxTokens }) => {
   } catch (error) {
     // Never surface the request config (it holds the API key).
     // Keep status/headers for the retry logic; message is safe to show.
-    const detail = error.response?.data?.error?.message || error.message;
+    const detail = providerMessage(error) || error.message;
     const wrapped = new Error(`LLM request to ${provider.name} failed: ${detail}`);
     wrapped.response = error.response && {
       status: error.response.status,

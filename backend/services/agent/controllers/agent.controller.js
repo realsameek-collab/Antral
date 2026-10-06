@@ -10,8 +10,10 @@ import {
   getMessages,
   listConversations,
   deleteConversation,
+  deleteConversationsForTarget,
 } from "../lib/agent/memory.js";
 import { limitsFor } from "../lib/agent/limits.js";
+import { resolveProvider } from "../lib/agent/llm.js";
 import { validateAttachments } from "../lib/agent/imageAttachments.js";
 
 const MAX_TASK_CHARS = 4000;
@@ -221,7 +223,36 @@ export const deleteConversationHandler = async (req, res, next) => {
   }
 };
 
+// DELETE /projects/:id — delete a project: revoke its authorization and
+// forget all of its chats. Run audit logs are kept.
+export const deleteProjectHandler = async (req, res, next) => {
+  try {
+    const auth = await findOwnAuthorization(req);
+    if (!auth || auth.status === "revoked") return res.status(404).json({ message: "Project not found." });
+    const busy = await AgentRun.exists({
+      userUid: req.user.uid,
+      authorizationId: auth._id,
+      status: { $in: ACTIVE_STATUSES },
+    });
+    if (busy) return res.status(409).json({ message: "The agent is working in this project. Stop it first." });
+
+    auth.status = "revoked";
+    auth.revokedAt = new Date();
+    await auth.save();
+    const chats = await deleteConversationsForTarget(req.user.uid, auth.target);
+    return res.json({ message: "Project deleted.", chatsDeleted: chats });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 // GET /limits — each agent's context window and work limits.
 export const getLimits = (_req, res) => {
-  res.json({ limits: { orchestrator: limitsFor("orchestrator") } });
+  let provider;
+  try {
+    provider = resolveProvider().name;
+  } catch {
+    provider = undefined;
+  }
+  res.json({ limits: { orchestrator: limitsFor("orchestrator", provider) } });
 };

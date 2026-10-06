@@ -18,6 +18,7 @@ import {
   answerApproval,
   cancelRun,
   deleteConversation,
+  deleteProject,
   getConversation,
   getRun,
   listConversations,
@@ -30,7 +31,7 @@ const MAX_IMAGES = 3
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp']
-const PERMISSION_TOOLS = /^turn_(on|off)_permission$/
+const PERMISSION_TOOLS = /^(turn_(on|off)_permission|add_project)$/
 
 const VIEW_TITLES = { dashboard: 'Dashboard', chat: 'Chat', images: 'Images', settings: 'Settings' }
 
@@ -43,8 +44,9 @@ const NAV = [
 const SOON = [
   { key: 'library', label: 'Library', icon: 'library' },
   { key: 'scheduled', label: 'Scheduled', icon: 'clock' },
-  { key: 'projects', label: 'Projects', icon: 'folder' },
 ]
+
+const targetKey = (target) => `${target?.type}|${target?.identifier}`
 
 function readImage(file) {
   return new Promise((resolve, reject) => {
@@ -134,12 +136,18 @@ function AgentConsole({ profile }) {
   const [search, setSearch] = useState('')
   const [deleting, setDeleting] = useState(null) // conversation pending delete
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deletingProject, setDeletingProject] = useState(null) // { auth, chats }
+  const [collapsed, setCollapsed] = useState({}) // project id -> true when folded
   const scrollRef = useRef(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const attachmentsRef = useRef([])
   const permissionSteps = useRef(0)
   const scrolledFor = useRef({ conversationId: null, length: 0 })
+  const conversationIdRef = useRef(null)
+  useEffect(() => {
+    conversationIdRef.current = conversationId
+  }, [conversationId])
 
   const userName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ') || 'Your account'
   const initials =
@@ -286,7 +294,16 @@ function AgentConsole({ profile }) {
         const changed = (run.steps || []).filter((s) => s.kind === 'tool_result' && s.ok && PERMISSION_TOOLS.test(s.tool)).length
         if (changed !== permissionSteps.current) {
           permissionSteps.current = changed
-          dispatch(refreshConsent())
+          const refreshed = dispatch(refreshConsent())
+          // The agent added a project and moved this chat into it: follow it there.
+          if ((run.steps || []).some((s) => s.kind === 'tool_result' && s.ok && s.tool === 'add_project')) {
+            Promise.all([refreshed, getConversation(run.conversationId)])
+              .then(([, { conversation }]) => {
+                if (conversationIdRef.current === conversation.id) setConversationTarget(conversation.target)
+                refreshConversations()
+              })
+              .catch(() => {})
+          }
         }
 
         if (!ACTIVE.includes(run.status)) {
@@ -320,7 +337,8 @@ function AgentConsole({ profile }) {
   }, [conversationId, thread.length, stepCount, liveStatus, opening])
 
   const newChat = useCallback(
-    (prompt) => {
+    (prompt, projectId) => {
+      if (projectId) setTargetId(projectId)
       setConversationId(null)
       setConversationTarget(null)
       setThread([])
@@ -446,6 +464,24 @@ function AgentConsole({ profile }) {
     }
   }
 
+  const confirmDeleteProject = async () => {
+    const { auth } = deletingProject
+    setDeleteBusy(true)
+    try {
+      await deleteProject(auth.id)
+      if (conversationTarget && targetKey(conversationTarget) === targetKey(auth.target)) newChat()
+      if (targetId === auth.id) setTargetId('')
+      dispatch(refreshConsent())
+      refreshConversations()
+      toast({ tone: 'success', message: `Project “${targetName(auth)}” deleted.` })
+      setDeletingProject(null)
+    } catch (err) {
+      toast({ tone: 'error', message: err.status === 409 ? err.message : "I couldn't delete that project. Please try again." })
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
   const busy = liveActive || sending
   const liveElsewhere = liveActive && liveRun.conversationId !== conversationId
 
@@ -466,7 +502,22 @@ function AgentConsole({ profile }) {
     const q = search.trim().toLowerCase()
     return (conversations || []).filter((c) => !q || (c.title || '').toLowerCase().includes(q))
   }, [conversations, search])
-  const groups = useMemo(() => groupConversations(filtered), [filtered])
+  // Chats grouped into their projects, most recently used project first.
+  // Chats whose project was removed land in "Other chats".
+  const projects = useMemo(() => {
+    const byTarget = new Map(targets.map((auth) => [targetKey(auth.target), { auth, chats: [], at: 0 }]))
+    const other = []
+    filtered.forEach((c) => {
+      const project = byTarget.get(targetKey(c.target))
+      if (!project) return other.push(c)
+      project.chats.push(c)
+      project.at = Math.max(project.at, new Date(c.updatedAt || c.createdAt).getTime())
+    })
+    const list = [...byTarget.values()]
+      .filter((p) => !search.trim() || p.chats.length)
+      .sort((a, b) => b.at - a.at)
+    return { list, other: groupConversations(other) }
+  }, [targets, filtered, search])
 
   const composer = (placeholder) => (
     <Composer
@@ -507,6 +558,34 @@ function AgentConsole({ profile }) {
           />
         )}
       </button>
+    )
+  }
+
+  const chatItem = (c) => {
+    const current = conversationId === c.id && currentView === 'chat'
+    const working = liveActive && liveRun.conversationId === c.id
+    return (
+      <li key={c.id} className="group/chat relative">
+        <button
+          type="button"
+          onClick={() => openConversation(c.id)}
+          title={`${c.title || 'New conversation'} · ${relativeTime(c.updatedAt)}`}
+          className={`flex w-full items-center gap-2 rounded-lg py-2 pl-2.5 pr-8 text-left text-[13px] transition ${
+            current ? 'bg-white/[0.08] text-white' : 'text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-100'
+          }`}
+        >
+          {working && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-indigo-400" />}
+          <span className="truncate">{c.title?.trim() || 'New conversation'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setDeleting(c)}
+          aria-label={`Delete “${c.title || 'conversation'}”`}
+          className="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-neutral-500 opacity-0 transition hover:bg-white/10 hover:text-rose-300 focus-visible:opacity-100 group-hover/chat:opacity-100"
+        >
+          <Icon name="trash" size={14} />
+        </button>
+      </li>
     )
   }
 
@@ -556,8 +635,17 @@ function AgentConsole({ profile }) {
       </nav>
 
       <div className="mt-5 flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between px-5 pb-2">
-          <h2 className="text-xs font-medium text-neutral-500">Recents</h2>
+        <div className="flex items-center justify-between pb-2 pl-5 pr-3">
+          <h2 className="text-xs font-medium text-neutral-500">Projects</h2>
+          <button
+            type="button"
+            onClick={() => navigate('settings', 'targets')}
+            title="Add a project, or just tell the agent which folder you want to work on"
+            aria-label="Add a project"
+            className="grid h-6 w-6 place-items-center rounded-md text-neutral-500 transition hover:bg-white/10 hover:text-white"
+          >
+            <Icon name="plus" size={14} />
+          </button>
         </div>
         {(conversations?.length || 0) > 6 && (
           <label className="mx-3 mb-2 flex items-center gap-2 rounded-lg border border-white/[0.08] bg-black/20 px-2.5 focus-within:border-white/20">
@@ -578,45 +666,68 @@ function AgentConsole({ profile }) {
                 <span key={w} className="skeleton block h-7 rounded-lg" style={{ width: `${w}%` }} />
               ))}
             </div>
-          ) : groups.length === 0 ? (
+          ) : projects.list.length === 0 && projects.other.length === 0 ? (
             <p className="px-2 py-1 text-xs leading-5 text-neutral-600">
-              {search ? 'No chats match your search.' : 'Your conversations will appear here.'}
+              {search ? 'No chats match your search.' : 'Your projects and their chats will appear here.'}
             </p>
           ) : (
-            groups.map((group) => (
-              <div key={group.label} className="mb-3">
-                <p className="px-2 pb-1 text-[11px] text-neutral-600">{group.label}</p>
-                <ul className="space-y-px">
-                  {group.items.map((c) => {
-                    const current = conversationId === c.id && currentView === 'chat'
-                    const working = liveActive && liveRun.conversationId === c.id
-                    return (
-                      <li key={c.id} className="group relative">
+            <>
+              {projects.list.map(({ auth, chats }) => {
+                const open = Boolean(search.trim()) || !collapsed[auth.id]
+                const name = targetName(auth)
+                return (
+                  <div key={auth.id} className="mb-1">
+                    <div className="group relative">
+                      <button
+                        type="button"
+                        onClick={() => setCollapsed((c) => ({ ...c, [auth.id]: open }))}
+                        aria-expanded={open}
+                        title={auth.target.identifier}
+                        className="flex w-full items-center gap-2 rounded-lg py-2 pl-2 pr-16 text-left text-[13px] text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
+                      >
+                        <Icon name="chevronRight" size={12} className={`shrink-0 text-neutral-600 transition-transform ${open ? 'rotate-90' : ''}`} />
+                        <Icon name={(TARGET_TYPE_META[auth.target.type] || TARGET_TYPE_META.project).icon} size={15} className="shrink-0 text-neutral-500" />
+                        <span className="truncate">{name}</span>
+                      </button>
+                      <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[11px] text-neutral-600 group-focus-within:opacity-0 group-hover:opacity-0">
+                        {chats.length || ''}
+                      </span>
+                      <div className="absolute right-1 top-1/2 flex -translate-y-1/2 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
                         <button
                           type="button"
-                          onClick={() => openConversation(c.id)}
-                          title={`${c.title || 'New conversation'} · ${relativeTime(c.updatedAt)}`}
-                          className={`flex w-full items-center gap-2 rounded-lg py-2 pl-2.5 pr-8 text-left text-[13px] transition ${
-                            current ? 'bg-white/[0.08] text-white' : 'text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-100'
-                          }`}
+                          onClick={() => newChat(undefined, auth.id)}
+                          aria-label={`New chat in “${name}”`}
+                          title="New chat in this project"
+                          className="grid h-7 w-7 place-items-center rounded-md text-neutral-500 hover:bg-white/10 hover:text-white"
                         >
-                          {working && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-indigo-400" />}
-                          <span className="truncate">{c.title?.trim() || 'New conversation'}</span>
+                          <Icon name="plus" size={14} />
                         </button>
                         <button
                           type="button"
-                          onClick={() => setDeleting(c)}
-                          aria-label={`Delete “${c.title || 'conversation'}”`}
-                          className="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-neutral-500 opacity-0 transition hover:bg-white/10 hover:text-rose-300 focus-visible:opacity-100 group-hover:opacity-100"
+                          onClick={() => setDeletingProject({ auth, chats: chats.length })}
+                          aria-label={`Delete project “${name}”`}
+                          title="Delete project"
+                          className="grid h-7 w-7 place-items-center rounded-md text-neutral-500 hover:bg-white/10 hover:text-rose-300"
                         >
                           <Icon name="trash" size={14} />
                         </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ))
+                      </div>
+                    </div>
+                    {open && (
+                      <ul className="ml-[15px] space-y-px border-l border-white/[0.06] pl-1.5">
+                        {chats.length ? chats.map(chatItem) : <li className="px-2.5 py-1.5 text-xs text-neutral-600">No chats yet</li>}
+                      </ul>
+                    )}
+                  </div>
+                )
+              })}
+              {projects.other.map((group) => (
+                <div key={group.label} className="mb-3 mt-3">
+                  <p className="px-2 pb-1 text-[11px] text-neutral-600">Other chats · {group.label}</p>
+                  <ul className="space-y-px">{group.items.map(chatItem)}</ul>
+                </div>
+              ))}
+            </>
           )}
         </div>
       </div>
@@ -815,6 +926,18 @@ function AgentConsole({ profile }) {
       </section>
 
       <ImageViewer image={viewerImage} onClose={() => setViewerImage(null)} />
+
+      <ConfirmDialog
+        open={Boolean(deletingProject)}
+        busy={deleteBusy}
+        title="Delete this project?"
+        message={`“${deletingProject ? targetName(deletingProject.auth) : ''}” will be removed${
+          deletingProject?.chats ? ` along with its ${deletingProject.chats === 1 ? 'chat' : `${deletingProject.chats} chats`}` : ''
+        }, and the agents lose access to it. Your files are not touched, and the audit log of its runs is kept.`}
+        confirmLabel="Delete project"
+        onConfirm={confirmDeleteProject}
+        onCancel={() => setDeletingProject(null)}
+      />
 
       <ConfirmDialog
         open={Boolean(deleting)}

@@ -7,5 +7,6 @@ import "./github.js";
 import "./dependencies.js";
 import "./web.js";
 import "./permissions.js";
+import "./projects.js";
 
 export * from "./registry.js";

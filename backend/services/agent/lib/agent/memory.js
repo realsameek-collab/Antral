@@ -154,6 +154,31 @@ export const deleteConversation = async (uid, id) => {
   return removed > 0;
 };
 
+// Moves a conversation to another target (project); its history comes along.
+export const moveConversation = async (uid, id, target) => {
+  if (!(await getConversation(uid, id))) return false;
+  await redis.hset(metaKey(uid, id), {
+    targetType: target.type,
+    targetId: target.identifier,
+    targetLabel: target.label || "",
+  });
+  return true;
+};
+
+// Forgets every conversation that belongs to a target. Returns how many.
+export const deleteConversationsForTarget = async (uid, target) => {
+  const ids = (await listConversations(uid, MAX_CONVERSATIONS))
+    .filter((c) => c.target.type === target.type && c.target.identifier === target.identifier)
+    .map((c) => c.id);
+  if (!ids.length) return 0;
+  await redis
+    .multi()
+    .zrem(indexKey(uid), ...ids)
+    .del(...ids.flatMap((id) => [metaKey(uid, id), msgsKey(uid, id)]))
+    .exec();
+  return ids.length;
+};
+
 // Keyword search across the user's other conversations (titles, summaries,
 // messages). Returns the best-matching snippets.
 export const searchMemory = async (uid, query, { excludeId, limit = 5 } = {}) => {

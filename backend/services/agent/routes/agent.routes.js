@@ -18,6 +18,7 @@ import {
   getConversationHandler,
   deleteConversationHandler,
   getLimits,
+  deleteProjectHandler,
 } from "../controllers/agent.controller.js";
 
 const router = Router();
@@ -43,6 +44,9 @@ router.post("/runs/:id/cancel", cancelRunHandler);
 // and appears here until the user answers Allow once / Always allow / Decline.
 router.get("/approvals", listPendingApprovals);
 router.post("/runs/:id/approval", answerApproval);
+
+// Projects (authorized targets) and their chats.
+router.delete("/projects/:id", deleteProjectHandler);
 
 // "Always allow" rules saved per target, so the user can review and remove them.
 router.get("/targets/:id/always-allow", getAlwaysAllow);

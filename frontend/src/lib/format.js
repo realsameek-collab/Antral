@@ -41,6 +41,7 @@ export function greeting(date = new Date()) {
 export function targetName(authorization) {
   const target = authorization?.target
   if (!target) return 'Unknown target'
+  if (target.type === 'computer') return 'Global'
   if (target.label) return target.label
   const id = String(target.identifier || '')
   if (target.type === 'github') {
@@ -56,6 +57,7 @@ export function targetName(authorization) {
 
 export const TARGET_TYPE_META = {
   local: { label: 'Local folder', icon: 'folder' },
+  computer: { label: 'Global', icon: 'computer' },
   github: { label: 'GitHub repo', icon: 'github' },
   host: { label: 'Host / URL', icon: 'globe' },
   project: { label: 'Project', icon: 'package' },

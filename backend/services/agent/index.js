@@ -6,6 +6,7 @@ import { redis } from "./config/redis.js";
 import consentRoutes from "./routes/consent.routes.js";
 import agentRoutes from "./routes/agent.routes.js";
 import { markInterruptedRuns } from "./lib/agent/orchestrator.js";
+import { LOCAL_COMPUTER_TARGET_ENABLED } from "./lib/policies.js";
 
 const port = process.env.PORT;
 
@@ -46,9 +47,9 @@ const start = async () => {
   await redis.connect();
   await connectDb();
   await markInterruptedRuns().catch((e) => console.error("Could not mark interrupted runs:", e.message));
-  app.listen(port, () => {
-    console.log(`agent service is running on port ${port}`);
-  });
+  const listening = () => console.log(`agent service is running on port ${port}`);
+  if (LOCAL_COMPUTER_TARGET_ENABLED) app.listen(port, "127.0.0.1", listening);
+  else app.listen(port, listening);
 };
 
 start().catch((error) => {

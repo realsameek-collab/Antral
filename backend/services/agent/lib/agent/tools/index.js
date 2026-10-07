@@ -8,5 +8,6 @@ import "./dependencies.js";
 import "./web.js";
 import "./permissions.js";
 import "./projects.js";
+import "./android.js";
 
 export * from "./registry.js";

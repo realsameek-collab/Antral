@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import axios from "axios";
-import { resolveInsideRoot } from "./pathGuard.js";
+import { resolveTargetPath } from "./pathGuard.js";
 
 // Reading files from whichever kind of target a run is on, so tools like the
 // dependency scanner work the same for a local folder and a GitHub repo.
@@ -54,8 +54,8 @@ export const readGithubFile = async (target, path, { signal } = {}) => {
 
 // Returns the file's contents as a Buffer, or throws.
 export const readTargetFile = async (ctx, path) => {
-  if (ctx.target.type === "local") {
-    const file = await resolveInsideRoot(ctx.root, path);
+  if (ctx.target.type === "local" || ctx.target.type === "computer") {
+    const file = await resolveTargetPath(ctx.target, ctx.root, path);
     const stat = await fs.stat(file);
     if (!stat.isFile()) throw new Error(`${path} is not a file.`);
     if (stat.size > MAX_FILE_BYTES) throw new Error(`${path} is too large to read (${stat.size} bytes).`);

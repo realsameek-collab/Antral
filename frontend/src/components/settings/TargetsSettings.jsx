@@ -150,7 +150,7 @@ function TargetCard({ authorization, scopes, disabled, accepted, onRevoke, onRea
             )}
           </span>
           <span className="mt-0.5 block truncate font-mono text-[11px] text-neutral-500" title={authorization.target.identifier}>
-            {authorization.target.identifier}
+                {authorization.target.type === 'computer' ? 'All accessible local drives' : authorization.target.identifier}
           </span>
         </button>
         <span className="hidden text-xs text-neutral-500 sm:block">
@@ -250,6 +250,10 @@ function TargetsSettings({ onNavigate }) {
   const accepted = Boolean(account?.accepted)
   const scopes = policies?.scopes || []
   const disabled = account?.disabledCapabilities || []
+  const globalAvailable = Boolean(policies?.features?.computerTarget)
+  const globalAuthorized = authorizations.some(
+    (authorization) => authorization.target.type === 'computer' && authorization.status === 'active',
+  )
 
   const confirmRevoke = async () => {
     setBusy(true)
@@ -266,12 +270,25 @@ function TargetsSettings({ onNavigate }) {
   return (
     <SettingsSection
       title="Targets"
-      description="Folders, repositories and hosts the agents may work on. Each target has its own permissions and lasts 90 days."
+      description="Folders, repositories, hosts and Global access the agents may work on. Each target has its own permissions and lasts 90 days."
       aside={
-        <Button variant="primary" size="sm" onClick={() => setDialog({})} disabled={!accepted}>
-          <Icon name="plus" size={14} />
-          Authorize a target
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {globalAvailable && !globalAuthorized && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setDialog({ prefill: { type: 'computer' } })}
+              disabled={!accepted}
+            >
+              <Icon name="computer" size={14} />
+              Authorize Global
+            </Button>
+          )}
+          <Button variant="primary" size="sm" onClick={() => setDialog({})} disabled={!accepted}>
+            <Icon name="plus" size={14} />
+            Authorize a target
+          </Button>
+        </div>
       }
     >
       {!accepted && <NeedsPolicies onNavigate={onNavigate} />}
@@ -283,7 +300,7 @@ function TargetsSettings({ onNavigate }) {
             title="No targets yet"
             action={accepted && <Button variant="primary" size="sm" onClick={() => setDialog({})}>Authorize your first target</Button>}
           >
-            The agents can’t act on anything until you authorize a folder, repository or host you own or may assess.
+            The agents can’t act on anything until you authorize a folder, repository, host or Global access you own or may assess.
           </EmptyState>
         </Card>
       ) : (

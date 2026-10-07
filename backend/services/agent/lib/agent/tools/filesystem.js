@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { registerTool } from "./registry.js";
-import { resolveInsideRoot, relativeToRoot } from "../pathGuard.js";
+import { getComputerRoots, relativeToTarget, resolveTargetPath } from "../pathGuard.js";
 
 // Read-only file-system tools, confined to the authorized local target.
 
@@ -19,16 +19,19 @@ registerTool({
   description:
     "List files and folders inside the authorized target. Skips node_modules, .git and build output. Use depth > 1 to see nested folders.",
   scope: "read_source",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "Folder relative to the target root. Default: root." },
+      path: { type: "string", description: "Folder relative to a local folder target. For This PC, use an absolute local path; the default lists accessible drives." },
       depth: { type: "integer", minimum: 1, maximum: 4, description: "How many levels deep. Default 1." },
     },
   },
-  run: async ({ path: p = ".", depth = 1 }, { root }) => {
-    const start = await resolveInsideRoot(root, p);
+  run: async ({ path: p = ".", depth = 1 }, ctx) => {
+    const roots =
+      ctx.target.type === "computer" && p === "."
+        ? await getComputerRoots()
+        : [await resolveTargetPath(ctx.target, ctx.root, p)];
     const maxDepth = Math.min(Math.max(Number(depth) || 1, 1), 4);
     const lines = [];
 
@@ -50,9 +53,14 @@ registerTool({
       }
     };
 
-    await walk(start, 0);
+    for (const start of roots) {
+      const displayPath = relativeToTarget(ctx.target, ctx.root, start);
+      lines.push(`${displayPath.replace(/[\\/]+$/, "")}${path.sep}`);
+      await walk(start, 0);
+      if (lines.length >= MAX_LIST_ENTRIES) break;
+    }
     if (lines.length >= MAX_LIST_ENTRIES) lines.push(`… truncated at ${MAX_LIST_ENTRIES} entries`);
-    return `${relativeToRoot(root, start)}/\n${lines.join("\n") || "(empty)"}`;
+    return lines.join("\n") || "(no accessible local drives)";
   },
 });
 
@@ -62,18 +70,18 @@ registerTool({
   description:
     "Read a text file inside the authorized target, with line numbers. Use startLine/maxLines for large files. Credentials in the output are masked.",
   scope: "read_source",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path relative to the target root." },
+      path: { type: "string", description: "File path relative to a local folder target. For This PC, use an absolute local path." },
       startLine: { type: "integer", minimum: 1, description: "First line to return. Default 1." },
       maxLines: { type: "integer", minimum: 1, maximum: 800, description: "Lines to return. Default 400." },
     },
     required: ["path"],
   },
-  run: async ({ path: p, startLine = 1, maxLines = 400 }, { root }) => {
-    const file = await resolveInsideRoot(root, p);
+  run: async ({ path: p, startLine = 1, maxLines = 400 }, ctx) => {
+    const file = await resolveTargetPath(ctx.target, ctx.root, p);
     const stat = await fs.stat(file);
     if (!stat.isFile()) throw new Error(`${p} is not a file.`);
     if (stat.size > MAX_FILE_BYTES) throw new Error(`${p} is too large to read (${stat.size} bytes).`);
@@ -86,7 +94,7 @@ registerTool({
     const slice = all.slice(from - 1, from - 1 + count);
     const body = slice.map((l, i) => `${String(from + i).padStart(5)}  ${l}`).join("\n");
     const more = from - 1 + count < all.length ? `\n… ${all.length - (from - 1 + count)} more lines` : "";
-    return `${relativeToRoot(root, file)} (${all.length} lines)\n${body}${more}`;
+    return `${relativeToTarget(ctx.target, ctx.root, file)} (${all.length} lines)\n${body}${more}`;
   },
 });
 
@@ -96,12 +104,12 @@ registerTool({
   description:
     "Search file contents inside the authorized target for a regular expression (case-insensitive). Returns matching lines with file and line number.",
   scope: "read_source",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   parameters: {
     type: "object",
     properties: {
       pattern: { type: "string", description: "JavaScript regular expression to search for." },
-      path: { type: "string", description: "Folder relative to the target root. Default: root." },
+      path: { type: "string", description: "Folder relative to a local folder target. For This PC, use an absolute local path; default is your home folder." },
       extensions: {
         type: "array",
         items: { type: "string" },
@@ -110,7 +118,7 @@ registerTool({
     },
     required: ["pattern"],
   },
-  run: async ({ pattern, path: p = ".", extensions }, { root }) => {
+  run: async ({ pattern, path: p = ".", extensions }, ctx) => {
     if (typeof pattern !== "string" || !pattern || pattern.length > 300) {
       throw new Error("Provide a pattern of 1–300 characters.");
     }
@@ -121,7 +129,7 @@ registerTool({
       throw new Error(`Invalid regular expression: ${e.message}`);
     }
     const exts = Array.isArray(extensions) ? extensions.map((e) => e.toLowerCase()) : null;
-    const start = await resolveInsideRoot(root, p);
+    const start = await resolveTargetPath(ctx.target, ctx.root, p);
     const matches = [];
     let filesSeen = 0;
 
@@ -144,7 +152,7 @@ registerTool({
         const lines = buf.toString("utf8").split(/\r?\n/);
         for (let i = 0; i < lines.length && matches.length < MAX_SEARCH_MATCHES; i += 1) {
           if (re.test(lines[i])) {
-            matches.push(`${relativeToRoot(root, full)}:${i + 1}: ${lines[i].trim().slice(0, 240)}`);
+            matches.push(`${relativeToTarget(ctx.target, ctx.root, full)}:${i + 1}: ${lines[i].trim().slice(0, 240)}`);
           }
         }
       }

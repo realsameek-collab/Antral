@@ -9,6 +9,7 @@ import Turn from './chat/Turn.jsx'
 import { ImageGallery, ImageViewer } from './chat/ImageGallery.jsx'
 import Dashboard from '../pages/Dashboard.jsx'
 import Settings from '../pages/Settings.jsx'
+import TargetAuthorizationDialog from './TargetAuthorizationDialog.jsx'
 import { loadConsent, refreshConsent } from '../store/consentSlice.js'
 import { useHashRoute } from '../lib/useHashRoute.js'
 import { ACTIVE } from '../lib/runs.js'
@@ -105,8 +106,10 @@ function AgentConsole({ profile }) {
   const user = useSelector((state) => state.auth.user)
   const consentStatus = useSelector((state) => state.consent.status)
   const account = useSelector((state) => state.consent.account)
+  const policies = useSelector((state) => state.consent.policies)
   const authorizations = useSelector((state) => state.consent.authorizations)
   const targets = useMemo(() => authorizations.filter((a) => a.status === 'active'), [authorizations])
+  const computerTargetAvailable = Boolean(policies?.features?.computerTarget)
   const route = useHashRoute('dashboard')
   const { view, sub } = route
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -137,6 +140,7 @@ function AgentConsole({ profile }) {
   const [deleting, setDeleting] = useState(null) // conversation pending delete
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deletingProject, setDeletingProject] = useState(null) // { auth, chats }
+  const [authorizingComputer, setAuthorizingComputer] = useState(false)
   const [collapsed, setCollapsed] = useState({}) // project id -> true when folded
   const scrollRef = useRef(null)
   const bottomRef = useRef(null)
@@ -482,6 +486,16 @@ function AgentConsole({ profile }) {
     }
   }
 
+  const onComputerAuthorized = async (authorization) => {
+    setAuthorizingComputer(false)
+    const refreshed = await dispatch(refreshConsent())
+    if (!refreshConsent.fulfilled.match(refreshed)) {
+      toast({ tone: 'error', message: 'Global was authorized, but the target list could not be refreshed. Reload the app to use it.' })
+      return
+    }
+    newChat(undefined, authorization.id)
+  }
+
   const busy = liveActive || sending
   const liveElsewhere = liveActive && liveRun.conversationId !== conversationId
 
@@ -505,7 +519,8 @@ function AgentConsole({ profile }) {
   // Chats grouped into their projects, most recently used project first.
   // Chats whose project was removed land in "Other chats".
   const projects = useMemo(() => {
-    const byTarget = new Map(targets.map((auth) => [targetKey(auth.target), { auth, chats: [], at: 0 }]))
+    const projectTargets = targets.filter((auth) => auth.target.type !== 'computer')
+    const byTarget = new Map(projectTargets.map((auth) => [targetKey(auth.target), { auth, chats: [], at: 0 }]))
     const other = []
     filtered.forEach((c) => {
       const project = byTarget.get(targetKey(c.target))
@@ -800,10 +815,17 @@ function AgentConsole({ profile }) {
               <select
                 value={selected.id}
                 onChange={(e) => {
+                  if (e.target.value === '__authorize_computer__') {
+                    setAuthorizingComputer(true)
+                    return
+                  }
                   setTargetId(e.target.value)
                   newChat()
                 }}
-                disabled={Boolean(conversationId) || targets.length < 2}
+                disabled={
+                  Boolean(conversationId) ||
+                  (targets.length < 2 && !(computerTargetAvailable && !targets.some((a) => a.target.type === 'computer')))
+                }
                 title={conversationId ? 'Start a new chat to switch targets' : targetName(selected)}
                 className="min-w-0 max-w-full cursor-pointer appearance-none truncate bg-transparent pr-4 text-xs text-neutral-100 focus:outline-none disabled:cursor-default"
               >
@@ -812,8 +834,16 @@ function AgentConsole({ profile }) {
                     {targetName(a)}
                   </option>
                 ))}
+                {computerTargetAvailable && !targets.some((a) => a.target.type === 'computer') && (
+                      <option value="__authorize_computer__" className="bg-[#18181c]">
+                        Authorize Global…
+                  </option>
+                )}
               </select>
-              {!conversationId && targets.length > 1 && <Icon name="chevronDown" size={12} className="pointer-events-none absolute right-2 text-neutral-500" />}
+              {!conversationId &&
+                (targets.length > 1 || (computerTargetAvailable && !targets.some((a) => a.target.type === 'computer'))) && (
+                  <Icon name="chevronDown" size={12} className="pointer-events-none absolute right-2 text-neutral-500" />
+                )}
             </label>
           )}
           {!['chat', 'dashboard'].includes(currentView) && (
@@ -926,6 +956,13 @@ function AgentConsole({ profile }) {
       </section>
 
       <ImageViewer image={viewerImage} onClose={() => setViewerImage(null)} />
+
+      <TargetAuthorizationDialog
+        open={authorizingComputer}
+        onClose={() => setAuthorizingComputer(false)}
+        prefill={{ type: 'computer' }}
+        onAuthorized={onComputerAuthorized}
+      />
 
       <ConfirmDialog
         open={Boolean(deletingProject)}

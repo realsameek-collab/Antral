@@ -15,6 +15,6 @@ app.get("/",(req,res)=>{
 
 
 
-app.listen(port , ()=>{
-    console.log(`server started at port ${port}`)
-})
+const listening = () => console.log(`server started at port ${port}`)
+if (process.env.ANTRAL_LOCAL_DESKTOP === "1") app.listen(port, "127.0.0.1", listening)
+else app.listen(port, listening)

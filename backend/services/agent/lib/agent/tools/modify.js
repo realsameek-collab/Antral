@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { registerTool } from "./registry.js";
-import { resolveInsideRoot, relativeToRoot } from "../pathGuard.js";
+import { isTargetRoot, relativeToTarget, resolveTargetPath } from "../pathGuard.js";
 import { runPowerShell } from "../shell.js";
 
 // Tools that change the user's system. All are `mutating`, so the executor
@@ -29,27 +29,27 @@ registerTool({
     "Create a file, or replace a file's entire contents, inside the target. Parent folders are created as needed. " +
     "For small changes to an existing file prefer edit_file.",
   scope: "modify_files",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   mutating: true,
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path relative to the target root." },
+      path: { type: "string", description: "File path relative to a local folder target. For This PC, use an absolute local path." },
       content: { type: "string", description: "The complete new file contents." },
     },
     required: ["path", "content"],
   },
   describe: ({ path: p, content = "" }) => `Write ${lineCount(content)} lines to ${p}`,
   ruleFor: () => "write_file",
-  run: async ({ path: p, content }, { root }) => {
+  run: async ({ path: p, content }, ctx) => {
     if (typeof content !== "string") throw new Error("content must be a string.");
     if (Buffer.byteLength(content) > MAX_WRITE_BYTES) throw new Error("content is larger than 1 MB.");
-    const file = await resolveInsideRoot(root, p);
+    const file = await resolveTargetPath(ctx.target, ctx.root, p);
     const before = await exists(file);
     if (before?.isDirectory()) throw new Error(`${p} is a folder.`);
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, content, "utf8");
-    return `${before ? "Replaced" : "Created"} ${relativeToRoot(root, file)} (${lineCount(content)} lines).`;
+    return `${before ? "Replaced" : "Created"} ${relativeToTarget(ctx.target, ctx.root, file)} (${lineCount(content)} lines).`;
   },
 });
 
@@ -60,12 +60,12 @@ registerTool({
     "Replace exact text in an existing file inside the target. oldText must match the file exactly (including indentation) " +
     "and appear once, unless replaceAll is true. Read the file first.",
   scope: "modify_files",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   mutating: true,
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "File path relative to the target root." },
+      path: { type: "string", description: "File path relative to a local folder target. For This PC, use an absolute local path." },
       oldText: { type: "string", description: "Exact text to replace." },
       newText: { type: "string", description: "Replacement text." },
       replaceAll: { type: "boolean", description: "Replace every occurrence. Default false." },
@@ -75,10 +75,10 @@ registerTool({
   describe: ({ path: p, oldText = "", newText = "" }) =>
     `Edit ${p}: replace ${lineCount(oldText)} line(s) with ${lineCount(newText)} line(s)`,
   ruleFor: () => "edit_file",
-  run: async ({ path: p, oldText, newText, replaceAll = false }, { root }) => {
+  run: async ({ path: p, oldText, newText, replaceAll = false }, ctx) => {
     if (typeof oldText !== "string" || !oldText) throw new Error("oldText must be a non-empty string.");
     if (typeof newText !== "string") throw new Error("newText must be a string.");
-    const file = await resolveInsideRoot(root, p);
+    const file = await resolveTargetPath(ctx.target, ctx.root, p);
     const original = await fs.readFile(file, "utf8");
     // Accept LF text for CRLF files.
     const eol = original.includes("\r\n") ? "\r\n" : "\n";
@@ -89,7 +89,7 @@ registerTool({
     if (count > 1 && !replaceAll) throw new Error(`oldText appears ${count} times. Add more context or set replaceAll.`);
     const updated = replaceAll ? original.split(find).join(replacement) : original.replace(find, () => replacement);
     await fs.writeFile(file, updated, "utf8");
-    return `Edited ${relativeToRoot(root, file)}: ${replaceAll ? count : 1} replacement(s).`;
+    return `Edited ${relativeToTarget(ctx.target, ctx.root, file)}: ${replaceAll ? count : 1} replacement(s).`;
   },
 });
 
@@ -98,19 +98,19 @@ registerTool({
   category: "computer",
   description: "Create a folder (and any missing parents) inside the target.",
   scope: "modify_files",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   mutating: true,
   parameters: {
     type: "object",
-    properties: { path: { type: "string", description: "Folder path relative to the target root." } },
+    properties: { path: { type: "string", description: "Folder path relative to a local folder target. For This PC, use an absolute local path." } },
     required: ["path"],
   },
   describe: ({ path: p }) => `Create folder ${p}`,
   ruleFor: () => "make_directory",
-  run: async ({ path: p }, { root }) => {
-    const dir = await resolveInsideRoot(root, p);
+  run: async ({ path: p }, ctx) => {
+    const dir = await resolveTargetPath(ctx.target, ctx.root, p);
     await fs.mkdir(dir, { recursive: true });
-    return `Created ${relativeToRoot(root, dir)}/`;
+    return `Created ${relativeToTarget(ctx.target, ctx.root, dir)}/`;
   },
 });
 
@@ -119,27 +119,27 @@ registerTool({
   category: "computer",
   description: "Move or rename a file or folder inside the target. Fails if the destination already exists.",
   scope: "modify_files",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   mutating: true,
   parameters: {
     type: "object",
     properties: {
-      from: { type: "string", description: "Existing path relative to the target root." },
-      to: { type: "string", description: "New path relative to the target root." },
+      from: { type: "string", description: "Existing path relative to a local folder target. For This PC, use an absolute local path." },
+      to: { type: "string", description: "New path relative to a local folder target. For This PC, use an absolute local path." },
     },
     required: ["from", "to"],
   },
   describe: ({ from, to }) => `Move ${from} → ${to}`,
   ruleFor: () => "move_path",
-  run: async ({ from, to }, { root }) => {
-    const src = await resolveInsideRoot(root, from);
-    const dest = await resolveInsideRoot(root, to);
-    if (src.toLowerCase() === root.toLowerCase()) throw new Error("The target root itself can't be moved.");
+  run: async ({ from, to }, ctx) => {
+    const src = await resolveTargetPath(ctx.target, ctx.root, from);
+    const dest = await resolveTargetPath(ctx.target, ctx.root, to);
+    if (isTargetRoot(ctx.target, ctx.root, src)) throw new Error("The target root itself can't be moved.");
     if (!(await exists(src))) throw new Error(`${from} does not exist.`);
     if (await exists(dest)) throw new Error(`${to} already exists.`);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.rename(src, dest);
-    return `Moved ${relativeToRoot(root, src)} → ${relativeToRoot(root, dest)}.`;
+    return `Moved ${relativeToTarget(ctx.target, ctx.root, src)} → ${relativeToTarget(ctx.target, ctx.root, dest)}.`;
   },
 });
 
@@ -149,12 +149,12 @@ registerTool({
   description:
     "Delete a file or folder inside the target. Folders need recursive: true. Only delete when the user's task calls for it.",
   scope: "modify_files",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   mutating: true,
   parameters: {
     type: "object",
     properties: {
-      path: { type: "string", description: "Path relative to the target root." },
+      path: { type: "string", description: "Path relative to a local folder target. For This PC, use an absolute local path." },
       recursive: { type: "boolean", description: "Required to delete a folder and its contents." },
     },
     required: ["path"],
@@ -162,14 +162,14 @@ registerTool({
   describe: ({ path: p, recursive }) => `Delete ${p}${recursive ? " (folder and everything in it)" : ""}`,
   // Deletes are never covered by "always allow"; each one is confirmed.
   ruleFor: () => null,
-  run: async ({ path: p, recursive = false }, { root }) => {
-    const target = await resolveInsideRoot(root, p);
-    if (target.toLowerCase() === root.toLowerCase()) throw new Error("The target root itself can't be deleted.");
+  run: async ({ path: p, recursive = false }, ctx) => {
+    const target = await resolveTargetPath(ctx.target, ctx.root, p);
+    if (isTargetRoot(ctx.target, ctx.root, target)) throw new Error("The target root itself can't be deleted.");
     const stat = await exists(target);
     if (!stat) throw new Error(`${p} does not exist.`);
     if (stat.isDirectory() && !recursive) throw new Error(`${p} is a folder; set recursive to delete it.`);
     await fs.rm(target, { recursive: stat.isDirectory(), force: false });
-    return `Deleted ${relativeToRoot(root, target)}${stat.isDirectory() ? "/" : ""}.`;
+    return `Deleted ${relativeToTarget(ctx.target, ctx.root, target)}${stat.isDirectory() ? "/" : ""}.`;
   },
 });
 
@@ -198,7 +198,7 @@ registerTool({
     "apply fixes, etc. The user approves each command. Prefer run_powershell_readonly for inspection. " +
     "Long-running servers are stopped at the timeout.",
   scope: "execute_powershell",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   mutating: true,
   parameters: {
     type: "object",

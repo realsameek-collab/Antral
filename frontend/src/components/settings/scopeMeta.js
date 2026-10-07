@@ -7,6 +7,7 @@ export const SCOPE_ICON = {
   web_research: 'globe',
   modify_files: 'doc',
   execute_powershell: 'terminal',
+  android_device: 'device',
   browser_automation: 'external',
   background_execution: 'clock',
 }
@@ -16,7 +17,7 @@ export const RISK_ORDER = ['standard', 'elevated', 'high']
 export const RISK_GROUP = {
   standard: { title: 'Read & analyse', hint: 'Look, never touch. Safe to leave on.' },
   elevated: { title: 'Make changes', hint: 'Can change files or act for you. Each change still asks you first.' },
-  high: { title: 'Run commands', hint: 'Runs on your machine with your privileges.' },
+  high: { title: 'Sensitive access', hint: 'Can run with your privileges or access sensitive device content.' },
 }
 
 const RISK_DOT = { standard: 'bg-emerald-400', elevated: 'bg-amber-400', high: 'bg-rose-400' }

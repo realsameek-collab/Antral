@@ -6,6 +6,12 @@ import { requestApproval } from "./approvals.js";
 
 const MAX_RESULT_CHARS = 30_000;
 
+export const requiresUserApproval = (tool, target) =>
+  tool.mutating || (target?.type === "computer" && tool.name.startsWith("run_"));
+
+export const approvalRuleFor = (tool, args, target) =>
+  target?.type === "computer" ? null : tool.ruleFor ? tool.ruleFor(args) : null;
+
 // Re-checks consent at the moment of each tool call — not just when the run
 // started — so revoking a target, withdrawing consent or flipping a
 // kill-switch stops a run that is already in progress.
@@ -48,9 +54,11 @@ export const executeToolCall = async ({ name, args, run, ctx }) => {
   let { denial, auth } = await checkPermission(permission);
   if (denial) return { ok: false, denied: true, content: `Denied: ${denial}`, durationMs: elapsed() };
 
-  // Changes need the user's say-so: an always-allow rule, or an answer now.
-  if (tool.mutating) {
-    const rule = tool.ruleFor ? tool.ruleFor(args) : null;
+  // This PC always asks before changes or commands, including read-only shell
+  // commands; saved "Always allow" rules do not bypass that boundary.
+  const needsApproval = requiresUserApproval(tool, run.target);
+  if (needsApproval) {
+    const rule = approvalRuleFor(tool, args, run.target);
     if (!(rule && auth.alwaysAllow.includes(rule))) {
       const decision = await requestApproval({
         run,

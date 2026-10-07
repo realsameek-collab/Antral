@@ -11,7 +11,10 @@ export const normalizeTarget = (target) => {
 
   if (!TARGET_TYPES.includes(type) || !identifier) return null;
 
-  if (type === "github") {
+  if (type === "computer") {
+    if (identifier.toLowerCase() !== "this-pc") return null;
+    identifier = "this-pc";
+  } else if (type === "github") {
     identifier = identifier.replace(/\/+$/, "").replace(/\.git$/i, "").toLowerCase();
   } else if (type === "host") {
     identifier = identifier.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").toLowerCase();
@@ -21,5 +24,5 @@ export const normalizeTarget = (target) => {
     identifier = identifier.replace(/^([a-z]):/i, (_m, d) => `${d.toLowerCase()}:`);
   }
 
-  return { type, identifier, label };
+  return { type, identifier, label: type === "computer" ? "This PC" : label };
 };

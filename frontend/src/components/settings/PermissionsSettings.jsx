@@ -148,7 +148,9 @@ function PermissionsSettings({ onNavigate }) {
         title={confirm?.kind === 'enable' ? `Turn on “${confirm.scope.label}”?` : 'Pause all agent capabilities?'}
         message={
           confirm?.kind === 'enable'
-            ? 'This is a high-risk capability: commands run on your machine with your account’s privileges. Any command that isn’t read-only still asks for your approval first.'
+            ? confirm.scope.id === 'android_device'
+              ? 'This is a high-risk capability: visible phone-screen text may be included in run history and sent to the configured AI model provider. Every action that changes the phone asks for your approval; app installation and arbitrary ADB commands are not available through the Android tools.'
+              : 'This is a high-risk capability: commands run on your machine with your account’s privileges. Any command that isn’t read-only still asks for your approval first.'
             : 'Every capability will be switched off for all targets. Running agents lose access at their next step. You can turn capabilities back on here at any time.'
         }
         confirmLabel={confirm?.kind === 'enable' ? 'Turn on' : 'Pause everything'}

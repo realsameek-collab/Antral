@@ -1,5 +1,5 @@
 import { AccountConsent, TargetAuthorization } from "../models/consent.model.js";
-import { CURRENT_ACCOUNT_VERSIONS } from "../lib/policies.js";
+import { CURRENT_ACCOUNT_VERSIONS, LOCAL_COMPUTER_TARGET_ENABLED } from "../lib/policies.js";
 import { normalizeTarget } from "../lib/targets.js";
 
 // Compares a user's AccountConsent against the current document versions and
@@ -49,6 +49,9 @@ export const requireTargetAuthorization = (requiredScopes = []) => async (req, r
       return res.status(400).json({
         message: "A valid target (type and identifier) is required.",
       });
+    }
+    if (target.type === "computer" && !LOCAL_COMPUTER_TARGET_ENABLED) {
+      return res.status(403).json({ message: "This PC access is available only in the local desktop app." });
     }
 
     const auth = await TargetAuthorization.findOne({

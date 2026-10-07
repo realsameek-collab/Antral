@@ -8,6 +8,7 @@ import {
   AUTHORIZATION_BASIS_IDS,
   isValidScope,
   TARGET_AUTH_TTL_DAYS,
+  LOCAL_COMPUTER_TARGET_ENABLED,
 } from "../lib/policies.js";
 import { normalizeTarget } from "../lib/targets.js";
 import { missingAccountDocuments } from "../middleware/requireConsent.js";
@@ -29,6 +30,7 @@ export const getPolicies = (_req, res) => {
     accountDocuments: publicAccountDocuments(),
     targetAuthorization: publicTargetAuthorization(),
     scopes: publicScopes(),
+    features: { computerTarget: LOCAL_COMPUTER_TARGET_ENABLED },
     versions: {
       account: CURRENT_ACCOUNT_VERSIONS,
       targetAuthorization: CURRENT_TARGET_AUTH_VERSION,
@@ -119,6 +121,9 @@ export const authorizeTarget = async (req, res) => {
   const target = normalizeTarget(rawTarget);
   if (!target) {
     return res.status(400).json({ message: "A valid target (type and identifier) is required." });
+  }
+  if (target.type === "computer" && !LOCAL_COMPUTER_TARGET_ENABLED) {
+    return res.status(403).json({ message: "This PC access is available only in the local desktop app." });
   }
 
   if (!attestation || attestation.ownershipConfirmed !== true) {

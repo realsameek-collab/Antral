@@ -75,6 +75,14 @@ export const SCOPES = [
     defaultOn: false,
   },
   {
+    id: "android_device",
+    label: "Access and control an Android phone",
+    description:
+      "Read the connected phone's device status and visible screen text, then launch installed apps or interact with the screen. Every phone action asks for your approval. This does not install apps or expose arbitrary ADB commands.",
+    risk: "high",
+    defaultOn: false,
+  },
+  {
     id: "browser_automation",
     label: "Drive a web browser",
     description:
@@ -110,7 +118,8 @@ export const AUTHORIZATION_BASES = [
 export const AUTHORIZATION_BASIS_IDS = AUTHORIZATION_BASES.map((b) => b.id);
 
 // Target types the agents can be pointed at.
-export const TARGET_TYPES = ["local", "github", "host", "project"];
+export const TARGET_TYPES = ["local", "computer", "github", "host", "project"];
+export const LOCAL_COMPUTER_TARGET_ENABLED = process.env.ANTRAL_LOCAL_DESKTOP === "1";
 
 // How long a per-target authorization stays valid before it must be renewed.
 export const TARGET_AUTH_TTL_DAYS = 90;
@@ -176,19 +185,23 @@ suspend access that we believe is being used in violation of these terms.`,
   {
     id: "privacy",
     title: "Privacy Policy",
-    version: "1.0.0",
-    effectiveDate: EFFECTIVE_DATE,
+    version: "1.2.0",
+    effectiveDate: "2026-10-06",
     summary:
-      "What data Antral reads and stores, including your code, scan results, and consent records.",
+      "What data Antral reads and stores, including your code, scan results, connected-device content, and consent records.",
     body: `# ${COMPANY_NAME} Privacy Policy
 
-_Effective ${EFFECTIVE_DATE} · Version 1.0.0_
+_Effective 2026-10-06 · Version 1.1.0_
 
 ## 1. What we process
 To do its job, ${COMPANY_NAME} processes:
 - **Account data** — your email and sign-in identity.
 - **Target data** — the source code, files, repository contents and host
   details of the targets you authorize us to assess.
+- **Connected-device content** — if you enable Android access, the visible
+  screen's text and accessibility labels, plus the actions you ask the agent to
+  perform. This content can be included in the run history and sent to the
+  configured AI model provider.
 - **Scan results** — the findings, reports and logs the agents produce.
 - **Consent records** — a record of the policies you accepted and the targets
   you authorized, including the time, your IP address and browser, kept as proof
@@ -196,7 +209,11 @@ To do its job, ${COMPANY_NAME} processes:
 
 ## 2. Local and system access
 Where you grant it, ${COMPANY_NAME} runs on your own computer and may read files
-and run commands locally. Command output is processed to produce findings.
+and run commands locally. If you separately enable Android access, it can read
+the connected phone's device status and visible screen labels, and operate
+installed apps through approved screen interactions. It does not install apps
+or provide arbitrary ADB shell access through the Android tools. This content
+is processed to carry out your task.
 
 ## 3. Third parties
 When you ask the agents to research an issue they may query public sources on
@@ -244,10 +261,10 @@ when you allow it — your computer. Use it responsibly.
   beyond the target you authorized.
 
 ## Dangerous capabilities
-Some capabilities — running PowerShell on your machine, driving a browser, and
-background execution — carry real risk. They are off by default and must be
-granted per target. Only enable them when you understand what the agents will do
-and accept that risk.
+Some capabilities — running PowerShell on your machine, driving a browser,
+controlling a connected Android phone, and background execution — carry real
+risk. They are off by default and must be granted per target. Only enable them
+when you understand what the agents will do and accept that risk.
 
 ## Enforcement
 Authorizations are scoped to specific targets and expire. We may refuse or halt
@@ -261,30 +278,34 @@ policy.`,
 export const TARGET_AUTHORIZATION_DOCUMENT = {
   id: "targetAuthorization",
   title: "Target Authorization",
-  version: "1.0.0",
+  version: "1.1.0",
   effectiveDate: EFFECTIVE_DATE,
   summary:
-    "Your attestation that you are allowed to test this specific target, and the permissions you grant the agents over it.",
+    "Your attestation that you are allowed to test this specific target, including every accessible local drive when you choose This PC.",
   body: `# Authorize a target
 
 You are about to let ${COMPANY_NAME}'s agents act on a specific target. Before
-they do, confirm the following **for this target only**:
+they do, confirm the following:
 
 1. **Authorization.** You own this target, or you have explicit permission to
    assess it. Testing a system you are not authorized to test may be illegal,
    and you take sole responsibility for having that authorization.
 
-2. **Scope.** The agents will act only on the target you name here, using only
-   the permissions you grant below. They will not reach beyond it on purpose.
+2. **Scope.** For a folder or repository, agents act only on that target. If you
+   choose **This PC**, read access covers every local drive accessible to the
+   desktop agent, and file changes or PowerShell commands require your approval
+   each time. Files you ask the agent to read may be sent to your configured AI
+   provider.
 
-3. **Risk.** Some permissions let the agents run commands on your computer or
-   drive a browser. You understand what each granted permission allows and
-   accept the risk.
+3. **Risk.** Some permissions let the agents run commands on your computer,
+   drive a browser, or read and interact with a connected Android phone. Phone
+   actions require your approval. You understand what each granted permission
+   allows and accept the risk.
 
 4. **Record.** We record this authorization — the target, the permissions, the
    time, your IP address and browser — as proof that you authorized this work.
 
-This authorization is specific to this target, expires after
+This authorization expires after
 ${TARGET_AUTH_TTL_DAYS} days, and can be revoked by you at any time.`,
 };
 

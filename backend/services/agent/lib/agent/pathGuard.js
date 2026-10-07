@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import os from "node:os";
 
 // Resolves `requested` inside the authorized target root and refuses anything
 // that escapes it — including via `..` or a symlink/junction pointing outside.
@@ -37,3 +38,66 @@ export const resolveInsideRoot = async (root, requested = ".") => {
 
 // Display a path relative to the target root, with forward slashes.
 export const relativeToRoot = (root, p) => path.relative(root, p).split(path.sep).join("/") || ".";
+
+const pathApi = process.platform === "win32" ? path.win32 : path.posix;
+
+const isLocalAbsolutePath = (value) =>
+  process.platform === "win32"
+    ? /^[a-z]:[\\/]/i.test(value)
+    : pathApi.isAbsolute(value);
+
+export const resolveComputerPath = async (requested = ".") => {
+  if (typeof requested !== "string") throw new Error("Path must be a string.");
+  const value = requested.trim() || ".";
+  if (/^(?:\\\\|\/\/|\\\\[.?]\\)/.test(value)) {
+    throw new Error("Network and device paths are not allowed for This PC.");
+  }
+  const candidate = path.resolve(isLocalAbsolutePath(value) ? value : path.join(os.homedir(), value));
+  if (!isLocalAbsolutePath(candidate)) throw new Error(`"${requested}" is not a local absolute path.`);
+
+  let existing = candidate;
+  while (true) {
+    try {
+      existing = await fs.realpath(existing);
+      break;
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) throw error;
+      existing = parent;
+    }
+  }
+  if (!isLocalAbsolutePath(existing) || /^(?:\\\\|\/\/)/.test(existing)) {
+    throw new Error("Network and device paths are not allowed for This PC.");
+  }
+  return candidate;
+};
+
+export const resolveTargetPath = (target, root, requested = ".") =>
+  target?.type === "computer" ? resolveComputerPath(requested) : resolveInsideRoot(root, requested);
+
+export const relativeToTarget = (target, root, p) =>
+  target?.type === "computer" ? p : relativeToRoot(root, p);
+
+export const isTargetRoot = (target, root, p) => {
+  if (target?.type !== "computer") return path.resolve(root).toLowerCase() === path.resolve(p).toLowerCase();
+  return pathApi.parse(p).root.toLowerCase() === path.resolve(p).toLowerCase();
+};
+
+export const getComputerRoots = async () => {
+  if (process.platform !== "win32") return [path.parse(process.cwd()).root];
+  const roots = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((drive) => `${drive}:\\`);
+  const available = await Promise.all(
+    roots.map(async (root) => {
+      try {
+        if (!(await fs.stat(root)).isDirectory()) return null;
+        const real = await fs.realpath(root);
+        return isLocalAbsolutePath(real) && !/^(?:\\\\|\/\/)/.test(real) ? root : null;
+      } catch (error) {
+        if (["ENOENT", "ENOTREADY", "EACCES", "ENODEV", "EINVAL", "EIO"].includes(error.code)) return null;
+        throw error;
+      }
+    }),
+  );
+  return available.filter(Boolean);
+};

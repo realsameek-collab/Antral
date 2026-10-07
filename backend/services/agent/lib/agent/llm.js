@@ -1,10 +1,10 @@
 import axios from "axios";
 import { estimateTokens } from "./limits.js";
 
-// Provider-agnostic chat client. Groq, Gemini and OpenRouter all expose an
+// Provider-agnostic chat client. Configured providers expose an
 // OpenAI-compatible /chat/completions endpoint with tool calling, so one
 // adapter covers them. LLM_PROVIDER (and optionally LLM_MODEL) picks the
-// preferred one; otherwise the first provider with an API key is preferred.
+// preferred one; otherwise the first configured provider is preferred.
 //
 // Every configured provider is a fallback: if the preferred one is rate
 // limited, out of quota, overloaded or down, the same request goes straight to
@@ -31,12 +31,23 @@ const PROVIDERS = {
     defaultModel: "openai/gpt-oss-120b",
     defaultVisionModel: "google/gemini-3.8-flash",
   },
+  cloudflare: {
+    accountIdEnv: "CLOUDFLARE_ACCOUNT_ID",
+    baseURL: "https://api.cloudflare.com/client/v4/accounts",
+    keyEnv: "CLOUDFLARE_API_TOKEN",
+    defaultModel: "@cf/openai/gpt-oss-20b",
+  },
 };
 
 // Provider name → time (ms) before which it is skipped after a failure.
 const coolingUntil = new Map();
 
-const configuredNames = () => Object.keys(PROVIDERS).filter((p) => process.env[PROVIDERS[p].keyEnv]);
+const isConfigured = (name) => {
+  const provider = PROVIDERS[name];
+  return [provider.keyEnv, provider.accountIdEnv].filter(Boolean).every((key) => process.env[key]?.trim());
+};
+
+const configuredNames = () => Object.keys(PROVIDERS).filter(isConfigured);
 
 const preferredName = () => (process.env.LLM_PROVIDER || "").trim().toLowerCase() || configuredNames()[0];
 
@@ -45,10 +56,20 @@ const preferredName = () => (process.env.LLM_PROVIDER || "").trim().toLowerCase(
 const describe = (name, { vision }) => {
   const provider = PROVIDERS[name];
   const own = name === preferredName();
+  const accountId = provider.accountIdEnv ? process.env[provider.accountIdEnv].trim() : null;
+  if (accountId && !/^[a-f0-9]{32}$/i.test(accountId)) {
+    throw new Error(`${provider.accountIdEnv} must be a 32-character Cloudflare account ID.`);
+  }
   const model = vision
     ? (own && process.env.LLM_VISION_MODEL) || provider.defaultVisionModel
     : (own && process.env.LLM_MODEL) || provider.defaultModel;
-  return { name, ...provider, apiKey: process.env[provider.keyEnv], model };
+  return {
+    name,
+    ...provider,
+    baseURL: accountId ? `${provider.baseURL}/${accountId}/ai/v1` : provider.baseURL,
+    apiKey: process.env[provider.keyEnv],
+    model,
+  };
 };
 
 // Preferred provider first, then the other configured ones. Providers cooling
@@ -57,11 +78,20 @@ const describe = (name, { vision }) => {
 const providerChain = ({ vision = false } = {}) => {
   const preferred = preferredName();
   if (preferred && !PROVIDERS[preferred]) throw new Error(`Unknown LLM provider "${preferred}".`);
-  if (preferred && !process.env[PROVIDERS[preferred].keyEnv]) {
-    throw new Error(`LLM provider "${preferred}" is selected but ${PROVIDERS[preferred].keyEnv} is not set.`);
+  if (preferred && !isConfigured(preferred)) {
+    const missing = [PROVIDERS[preferred].keyEnv, PROVIDERS[preferred].accountIdEnv]
+      .filter((key) => key && !process.env[key]?.trim());
+    throw new Error(`LLM provider "${preferred}" is selected but ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not set.`);
   }
-  const names = [preferred, ...configuredNames().filter((n) => n !== preferred)].filter(Boolean);
-  if (!names.length) throw new Error("No LLM provider configured. Set GROQ_API_KEY, GEMINI_API_KEY or OPENROUTER_API_KEY.");
+  const configured = configuredNames().filter((name) => !vision || PROVIDERS[name].defaultVisionModel);
+  const names = [preferred, ...configured.filter((n) => n !== preferred)]
+    .filter((name) => name && configured.includes(name));
+  if (!names.length) {
+    if (vision) throw new Error("No vision-capable LLM provider is configured.");
+    throw new Error(
+      "No LLM provider configured. Set GROQ_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, or both CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN.",
+    );
+  }
   const now = Date.now();
   const ready = names.filter((n) => (coolingUntil.get(n) || 0) <= now);
   const cooling = names

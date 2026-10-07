@@ -30,6 +30,7 @@ function activityLabel(step) {
       if (tool === 'get_permissions') return 'Checking your permissions'
       if (/permission/.test(tool)) return 'Updating your permissions'
       if (tool === 'recall_memory') return 'Recalling earlier conversations'
+      if (/^android_/.test(tool)) return 'Using connected Android phone'
       if (/read|list|search|find|grep|glob|scan/.test(tool)) return 'Searching the project'
       if (/write|edit|delete|move|directory/.test(tool)) return 'Updating project files'
       if (/command|terminal|powershell/.test(tool)) return 'Running a command'
@@ -118,6 +119,7 @@ function ApprovalCard({ approval, onAnswer, busy }) {
   const scopes = useSelector((state) => state.consent.policies?.scopes || [])
   const args = approval.args || {}
   const isPermission = approval.tool === 'turn_on_permission'
+  const isCommand = approval.tool.startsWith('run_')
   const scope = isPermission ? scopes.find((s) => s.id === args.scope) : null
   const preview = isPermission
     ? null
@@ -140,11 +142,11 @@ function ApprovalCard({ approval, onAnswer, busy }) {
     <div className="approval-in mt-3 rounded-2xl border border-amber-400/30 bg-amber-500/[0.06] p-4">
       <div className="flex items-start gap-3">
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-amber-500/15 text-amber-300">
-          <Icon name={isPermission ? 'key' : approval.tool === 'run_command' ? 'terminal' : 'doc'} size={16} />
+          <Icon name={isPermission ? 'key' : isCommand ? 'terminal' : 'doc'} size={16} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">
-            {isPermission ? 'Permission request' : 'The agent wants to make a change'}
+            {isPermission ? 'Permission request' : isCommand ? 'The agent wants to run a command' : 'The agent wants to make a change'}
           </p>
           <p className="mt-1 text-sm text-white">{approval.summary}</p>
           {scope && (

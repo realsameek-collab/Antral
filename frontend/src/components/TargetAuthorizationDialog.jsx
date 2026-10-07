@@ -7,7 +7,8 @@ import { SCOPE_ICON } from './settings/scopeMeta.js'
 import { authorizeTarget } from '../store/consentSlice.js'
 
 const TARGET_TYPES = [
-  { id: 'local', label: 'Local folder', icon: 'folder', placeholder: 'C:\\path\\to\\project', hint: 'The full path of a folder on this computer.' },
+  { id: 'local', label: 'Local folder', icon: 'folder', placeholder: 'C:\\path\\to\\project', hint: "The full path of a folder accessible to the agent backend. File tools stay inside this folder; approved PowerShell commands run with the backend account's privileges." },
+  { id: 'computer', label: 'Global', icon: 'computer', placeholder: '', hint: 'Read-only access to accessible local drives. Every file change and PowerShell command asks for approval.' },
   { id: 'github', label: 'GitHub repo', icon: 'github', placeholder: 'https://github.com/owner/repo', hint: 'A repository you own or may assess.' },
   { id: 'host', label: 'Host / URL', icon: 'globe', placeholder: 'app.example.com', hint: 'A domain or host you are authorized to test.' },
 ]
@@ -24,6 +25,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
   const disabled = useSelector((state) => state.consent.account?.disabledCapabilities || [])
 
   const scopes = useMemo(() => policies?.scopes || [], [policies])
+  const computerTargetAvailable = Boolean(policies?.features?.computerTarget)
   const authDoc = policies?.targetAuthorization
   const authVersion = policies?.versions?.targetAuthorization
 
@@ -34,14 +36,23 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
   const [confirmed, setConfirmed] = useState(false)
   const [showTerms, setShowTerms] = useState(false)
   const [granted, setGranted] = useState(() =>
-    Object.fromEntries(scopes.map((s) => [s.id, prefill?.scopes ? prefill.scopes.includes(s.id) : s.defaultOn])),
+    Object.fromEntries(scopes.map((s) => [
+      s.id,
+      prefill?.scopes
+        ? prefill.scopes.includes(s.id)
+        : prefill?.type === 'computer'
+          ? s.id === 'read_source'
+          : s.defaultOn,
+    ])),
   )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
   const selectedScopes = scopes.filter((s) => granted[s.id]).map((s) => s.id)
+  const availableTargetTypes = TARGET_TYPES.filter((t) => t.id !== 'computer' || computerTargetAvailable)
   const typeMeta = TARGET_TYPES.find((t) => t.id === targetType) || TARGET_TYPES[0]
-  const missing = !identifier.trim() ? 'Enter the target' : selectedScopes.length === 0 ? 'Choose at least one permission' : !confirmed ? 'Confirm your authorization' : null
+  const targetIdentifier = targetType === 'computer' ? 'this-pc' : identifier.trim()
+  const missing = !targetIdentifier ? 'Enter the target' : selectedScopes.length === 0 ? 'Choose at least one permission' : !confirmed ? 'Confirm your authorization' : null
 
   const submit = async (event) => {
     event.preventDefault()
@@ -50,7 +61,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
     setSubmitting(true)
     const result = await dispatch(
       authorizeTarget({
-        target: { type: targetType, identifier: identifier.trim(), label: label.trim() },
+        target: { type: targetType, identifier: targetIdentifier, label: targetType === 'computer' ? 'This PC' : label.trim() },
         attestation: { ownershipConfirmed: true, basis },
         scopes: selectedScopes,
         authorizationVersion: authVersion,
@@ -70,14 +81,22 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
       <div className="space-y-6 px-6 py-5">
         <fieldset>
           <legend className="mb-2 text-xs font-medium text-neutral-400">What should the agents work on?</legend>
-          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Target type">
-            {TARGET_TYPES.map((t) => (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Target type">
+            {availableTargetTypes.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 role="radio"
                 aria-checked={t.id === targetType}
-                onClick={() => setTargetType(t.id)}
+                onClick={() => {
+                  setTargetType(t.id)
+                  if (!prefill || t.id !== prefill.type) {
+                    setGranted(Object.fromEntries(scopes.map((scope) => [
+                      scope.id,
+                      t.id === 'computer' ? scope.id === 'read_source' : scope.defaultOn,
+                    ])))
+                  }
+                }}
                 className={`flex flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-xs transition ${
                   t.id === targetType
                     ? 'border-indigo-400/50 bg-indigo-500/10 text-indigo-100'
@@ -89,7 +108,11 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               </button>
             ))}
           </div>
-          <label className="mt-3 block">
+          {targetType === 'computer' ? (
+            <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/[0.06] px-3.5 py-3 text-xs leading-5 text-amber-100/80">
+              Global mode grants the desktop agent read access across accessible local drives. Files you ask it to read may be sent to your configured AI provider. Changes and all PowerShell commands require your approval every time.
+            </div>
+          ) : <label className="mt-3 block">
             <span className="sr-only">Target</span>
             <input
               value={identifier}
@@ -100,9 +123,9 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               data-autofocus
               className="w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 font-mono text-sm outline-none transition placeholder:font-sans placeholder:text-neutral-600 focus:border-indigo-400/60 focus:ring-4 focus:ring-indigo-500/10"
             />
-          </label>
+          </label>}
           <p className="mt-1.5 px-1 text-[11px] text-neutral-500">{typeMeta.hint}</p>
-          <label className="mt-3 block">
+          {targetType !== 'computer' && <label className="mt-3 block">
             <span className="sr-only">Label</span>
             <input
               value={label}
@@ -111,7 +134,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               maxLength={80}
               className="w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-neutral-600 focus:border-indigo-400/60 focus:ring-4 focus:ring-indigo-500/10"
             />
-          </label>
+          </label>}
         </fieldset>
 
         <fieldset>
@@ -222,7 +245,7 @@ function TargetAuthorizationDialog({ open, onClose, prefill, onAuthorized }) {
     <Modal
       open={open}
       onClose={onClose}
-      title={prefill ? 'Re-authorize target' : 'Authorize a target'}
+      title={prefill?.type === 'computer' ? 'Authorize Global' : prefill ? 'Re-authorize target' : 'Authorize a target'}
       description="Confirm you may assess this target and choose what the agents are allowed to do there."
     >
       {open && <AuthorizationForm prefill={prefill} onClose={onClose} onAuthorized={onAuthorized} />}

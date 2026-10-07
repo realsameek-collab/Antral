@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import { AgentRun } from "../../models/agentRun.model.js";
 import { availableTools } from "./tools/index.js";
+import { LOCAL_COMPUTER_TARGET_ENABLED } from "../policies.js";
 import { chat, toToolSchemas, resolveProvider, isTooLarge } from "./llm.js";
 import { executeToolCall } from "./executor.js";
 import { redactSecrets } from "./redact.js";
@@ -25,21 +27,24 @@ const active = new Map(); // runId -> AbortController
 
 const systemPrompt = ({ target, tools, summary }) => {
   const noSystemTools = !tools.some((t) => t.scope !== null);
+  const computerTarget = target.type === "computer";
   return `You are Antral, an AI operator working on the user's own computer and projects.
 
 Your main specialty is cybersecurity: finding weaknesses in the user's code, dependencies, configuration and system, explaining them, and showing how to fix them. You can also handle general tasks (understanding a codebase, debugging, answering questions about a project) with the same care.
 
-Target you are authorized to work on: ${target.type} "${target.identifier}"${target.label ? ` (${target.label})` : ""}.
+Target you are authorized to work on: ${target.type === "computer" ? "This PC (accessible local drives)" : `${target.type} "${target.identifier}"${target.label ? ` (${target.label})` : ""}`}.
 Tools available in this run: ${tools.map((t) => t.name).join(", ") || "none"}.
 
 How to work:
 - Plan briefly, then use tools to gather real evidence. Don't guess about files you haven't read.
 - If a tool fails, read the error and try a different approach rather than repeating the same call.
 - Stay inside the authorized target. Never try to get around a refused or denied action. Report it instead.
-- Inspect before you change anything. Tools that change the system (writing, editing, moving or deleting files, run_command) pause and ask the user to allow or decline. Keep each change small and purposeful, and say in your message why you are making it.
+- Inspect before changing anything. Changes and commands always pause for approval on This PC; other targets follow their saved target rules. Keep each change small and purposeful, and explain it.
 - If the user declines an action, don't retry it. Find another way, or explain the change so they can make it themselves.
+- ${computerTarget ? "On This PC, never use saved always-allow rules to skip approvals. For file tools, use absolute local paths from the drive listing." : "Stay within the authorized target for every action."}
 - Only make the changes the task calls for. Never delete or overwrite work you didn't create unless the user asked. Prefer edit_file over rewriting whole files.
 - After changing code, verify it (run the tests or build, or re-read the file) and fix anything you broke.
+- For Android phone tasks, use the registered Android tools and inspect the screen before acting. Never use shell or another tool to bypass their supported operations or access phone files.
 - Credentials in tool output are masked. Report where a secret is (file:line) and what kind it is. Never try to recover its value.
 
 Permissions:
@@ -239,6 +244,13 @@ export const startRun = async ({ userUid, authorization, target, task, disabledS
       error.status = 422;
       throw error;
     }
+  } else if (target.type === "computer") {
+    if (!LOCAL_COMPUTER_TARGET_ENABLED) {
+      const error = new Error("This PC access is available only in the local desktop app.");
+      error.status = 403;
+      throw error;
+    }
+    root = os.homedir();
   }
 
   const history = await loadHistory(userUid, conversationId);

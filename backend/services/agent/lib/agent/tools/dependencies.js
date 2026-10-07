@@ -90,7 +90,7 @@ registerTool({
     "Check the project's dependencies for known vulnerabilities using the OSV.dev database. Reads package-lock.json (best), " +
     "package.json, requirements.txt or pyproject.toml. Give a folder to scan a sub-project, e.g. 'frontend'.",
   scope: "dependency_scan",
-  targetTypes: ["local", "github"],
+  targetTypes: ["local", "computer", "github"],
   parameters: {
     type: "object",
     properties: {

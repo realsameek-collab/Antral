@@ -39,13 +39,18 @@ const tokenize = (segment) =>
 // Parameters that would reach another machine instead of this one.
 const REMOTE_PARAMS = /^-(computername|cimsession|session|credential)\b/i;
 
-const checkPathToken = (raw) => {
+const checkPathToken = (raw, computerTarget) => {
   if (REMOTE_PARAMS.test(raw)) return "Remote-machine parameters are not allowed.";
   // `-Path:C:\x` binds the value inline; check the value part.
   const tok = /^-[a-z]+:/i.test(raw) ? raw.slice(raw.indexOf(":") + 1) : raw;
   if (!tok) return null;
   if (FORBIDDEN_DRIVES.test(tok)) return `"${tok}" is not allowed (it could expose secrets).`;
   if (ALLOWED_ABSOLUTE.test(tok)) return null;
+  if (computerTarget) {
+    if (/^[\\/]{2}/.test(tok)) return "Network and device paths are not allowed for This PC.";
+    if (process.platform === "win32" ? /^[a-z]:[\\/]/i.test(tok) : tok.startsWith("/")) return null;
+    return null;
+  }
   if (/^[a-z]:/i.test(tok) || /^[\\/]{2}/.test(tok) || /^~/.test(tok) || /(^|[\\/])\.\.([\\/]|$)/.test(tok)) {
     return `"${tok}" points outside the authorized target. Use paths relative to the target.`;
   }
@@ -78,7 +83,7 @@ const checkNative = (tokens) => {
 };
 
 // Returns { ok, reason, command } — `command` is the string to execute.
-export const validateReadOnlyCommand = (input) => {
+export const validateReadOnlyCommand = (input, { computerTarget = false } = {}) => {
   if (typeof input !== "string" || !input.trim()) return { ok: false, reason: "Empty command." };
   const command = input.trim();
   if (command.length > 500) return { ok: false, reason: "Command is too long." };
@@ -115,7 +120,7 @@ export const validateReadOnlyCommand = (input) => {
       return { ok: false, reason: `"${tokens[0]}" is not on the read-only allowlist.` };
     }
     for (const tok of tokens.slice(1)) {
-      const problem = checkPathToken(tok);
+      const problem = checkPathToken(tok, computerTarget);
       if (problem) return { ok: false, reason: problem };
     }
     rewritten.push(segment);
@@ -132,7 +137,7 @@ registerTool({
     "Only allowlisted Get-/Test-/Select-/Where-/Sort-/Format- cmdlets and read-only git/npm/node commands are permitted, " +
     "with no variables, script blocks, parentheses or redirection. Use relative paths.",
   scope: "execute_powershell",
-  targetTypes: ["local"],
+  targetTypes: ["local", "computer"],
   mutating: false,
   parameters: {
     type: "object",
@@ -141,9 +146,9 @@ registerTool({
     },
     required: ["command"],
   },
-  run: async ({ command }, { root, signal }) => {
-    const check = validateReadOnlyCommand(command);
+  run: async ({ command }, ctx) => {
+    const check = validateReadOnlyCommand(command, { computerTarget: ctx.target.type === "computer" });
     if (!check.ok) throw new Error(`Command refused: ${check.reason}`);
-    return runPowerShell(check.command, { cwd: root, signal });
+    return runPowerShell(check.command, { cwd: ctx.root, signal: ctx.signal });
   },
 });

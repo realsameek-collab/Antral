@@ -26,6 +26,12 @@ const PATHS = {
     </>
   ),
   folder: <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2.5h7.4a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z" />,
+  computer: (
+    <>
+      <rect x="3" y="4" width="18" height="13" rx="2" />
+      <path d="M8 21h8M12 17v4" />
+    </>
+  ),
   settings: (
     <>
       <path d="M4 7h9M17 7h3M4 17h3M11 17h9" />
@@ -99,6 +105,12 @@ const PATHS = {
     <>
       <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
       <path d="m7 9.5 3 2.5-3 2.5M12.5 15H17" />
+    </>
+  ),
+  device: (
+    <>
+      <rect x="6.5" y="2.5" width="11" height="19" rx="2" />
+      <path d="M10 5.5h4M11 18.5h2" />
     </>
   ),
   globe: (

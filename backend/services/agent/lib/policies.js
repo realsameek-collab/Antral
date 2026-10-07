@@ -103,6 +103,11 @@ export const SCOPES = [
 export const SCOPE_IDS = SCOPES.map((s) => s.id);
 export const isValidScope = (id) => SCOPE_IDS.includes(id);
 
+// The Global target (This PC) has every capability; kill-switches and
+// per-action approvals still apply.
+export const effectiveScopes = (authorization) =>
+  authorization.target?.type === "computer" ? SCOPE_IDS : authorization.scopes;
+
 // Bases a user can rely on to assert they are allowed to assess a target.
 export const AUTHORIZATION_BASES = [
   { id: "owner", label: "I own this target" },

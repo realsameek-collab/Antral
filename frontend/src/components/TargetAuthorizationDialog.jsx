@@ -8,7 +8,7 @@ import { authorizeTarget } from '../store/consentSlice.js'
 
 const TARGET_TYPES = [
   { id: 'local', label: 'Local folder', icon: 'folder', placeholder: 'C:\\path\\to\\project', hint: "The full path of a folder accessible to the agent backend. File tools stay inside this folder; approved PowerShell commands run with the backend account's privileges." },
-  { id: 'computer', label: 'Global', icon: 'computer', placeholder: '', hint: 'Read-only access to accessible local drives. Every file change and PowerShell command asks for approval.' },
+  { id: 'computer', label: 'Global', icon: 'computer', placeholder: '', hint: 'Every permission on all accessible local drives. Every file change and PowerShell command still asks for approval.' },
   { id: 'github', label: 'GitHub repo', icon: 'github', placeholder: 'https://github.com/owner/repo', hint: 'A repository you own or may assess.' },
   { id: 'host', label: 'Host / URL', icon: 'globe', placeholder: 'app.example.com', hint: 'A domain or host you are authorized to test.' },
 ]
@@ -41,7 +41,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
       prefill?.scopes
         ? prefill.scopes.includes(s.id)
         : prefill?.type === 'computer'
-          ? s.id === 'read_source'
+          ? true
           : s.defaultOn,
     ])),
   )
@@ -93,7 +93,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
                   if (!prefill || t.id !== prefill.type) {
                     setGranted(Object.fromEntries(scopes.map((scope) => [
                       scope.id,
-                      t.id === 'computer' ? scope.id === 'read_source' : scope.defaultOn,
+                      t.id === 'computer' ? true : scope.defaultOn,
                     ])))
                   }
                 }}
@@ -110,7 +110,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
           </div>
           {targetType === 'computer' ? (
             <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/[0.06] px-3.5 py-3 text-xs leading-5 text-amber-100/80">
-              Global mode grants the desktop agent read access across accessible local drives. Files you ask it to read may be sent to your configured AI provider. Changes and all PowerShell commands require your approval every time.
+              Global mode grants the desktop agent every permission across accessible local drives: read, edit, PowerShell, browser and more. Capabilities you turn off account-wide stay off. Files you ask it to read may be sent to your configured AI provider. Changes and all PowerShell commands require your approval every time.
             </div>
           ) : <label className="mt-3 block">
             <span className="sr-only">Target</span>
@@ -137,7 +137,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
           </label>}
         </fieldset>
 
-        <fieldset>
+        {targetType !== 'computer' && <fieldset>
           <legend className="mb-2 flex w-full items-baseline justify-between text-xs font-medium text-neutral-400">
             Permissions for this target
             <span className="font-normal text-neutral-600">{selectedScopes.length} selected</span>
@@ -170,7 +170,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               </label>
             ))}
           </div>
-        </fieldset>
+        </fieldset>}
 
         <div className="space-y-3 rounded-xl border border-indigo-400/20 bg-indigo-500/[0.05] p-4">
           <label className="block">

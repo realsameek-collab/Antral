@@ -32,17 +32,12 @@ export const listTools = () => [...tools.values()];
 
 // Tools this run may use: the right target type, scope granted for the target,
 // and not switched off account-wide. The model is only ever shown these.
-// If unrestricted mode is enabled, all tools are available (still logged for audit).
-export const availableTools = ({ targetType, grantedScopes, disabledScopes, unrestrictedMode }) => {
-  if (unrestrictedMode) {
-    return listTools().filter((t) => t.targetTypes.includes("*") || t.targetTypes.includes(targetType));
-  }
-  return listTools().filter(
+export const availableTools = ({ targetType, grantedScopes, disabledScopes }) =>
+  listTools().filter(
     (t) =>
       (t.targetTypes.includes("*") || t.targetTypes.includes(targetType)) &&
       (t.scope === null || (grantedScopes.includes(t.scope) && !disabledScopes.includes(t.scope))),
   );
-};
 
 // Public description for the UI.
 export const publicTool = (t) => ({

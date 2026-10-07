@@ -1,5 +1,6 @@
 import { AccountConsent, TargetAuthorization } from "../../models/consent.model.js";
 import { missingAccountDocuments } from "../../middleware/requireConsent.js";
+import { effectiveScopes } from "../policies.js";
 import { getTool } from "./tools/index.js";
 import { redactSecrets } from "./redact.js";
 import { requestApproval } from "./approvals.js";
@@ -26,7 +27,7 @@ const checkPermission = async ({ userUid, authorizationId, scope }) => {
     return { denial: "The target authorization was revoked or has expired." };
   }
   if (scope === null) return { auth }; // touches no system resource
-  if (!auth.scopes.includes(scope)) return { denial: `Permission "${scope}" is not granted for this target.` };
+  if (!effectiveScopes(auth).includes(scope)) return { denial: `Permission "${scope}" is not granted for this target.` };
   if ((consent.disabledCapabilities || []).includes(scope)) return { denial: `Capability "${scope}" is turned off.` };
   return { auth };
 };

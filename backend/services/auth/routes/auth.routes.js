@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { sendCode, verifyCode } from "../controllers/auth.controller.js";
-import { getProfile, saveProfile, getUnrestrictedMode, setUnrestrictedMode } from "../controllers/profile.controller.js";
+import { getProfile, saveProfile } from "../controllers/profile.controller.js";
 import { endSession, requireSession, startSession } from "../controllers/session.controller.js";
 
 const router = Router();
@@ -11,7 +11,5 @@ router.post("/session", startSession);
 router.delete("/session", endSession);
 router.get("/profile", requireSession, getProfile);
 router.put("/profile", requireSession, saveProfile);
-router.get("/unrestricted-mode", requireSession, getUnrestrictedMode);
-router.put("/unrestricted-mode", requireSession, setUnrestrictedMode);
 
 export default router;

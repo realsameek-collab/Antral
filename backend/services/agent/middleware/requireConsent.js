@@ -1,5 +1,5 @@
 import { AccountConsent, TargetAuthorization } from "../models/consent.model.js";
-import { CURRENT_ACCOUNT_VERSIONS, LOCAL_COMPUTER_TARGET_ENABLED } from "../lib/policies.js";
+import { CURRENT_ACCOUNT_VERSIONS, LOCAL_COMPUTER_TARGET_ENABLED, effectiveScopes } from "../lib/policies.js";
 import { normalizeTarget } from "../lib/targets.js";
 
 // Compares a user's AccountConsent against the current document versions and
@@ -70,7 +70,7 @@ export const requireTargetAuthorization = (requiredScopes = []) => async (req, r
       });
     }
 
-    const notGranted = requiredScopes.filter((s) => !auth.scopes.includes(s));
+    const notGranted = requiredScopes.filter((s) => !effectiveScopes(auth).includes(s));
     if (notGranted.length > 0) {
       return res.status(403).json({
         message: "This action needs permissions you have not granted for this target.",

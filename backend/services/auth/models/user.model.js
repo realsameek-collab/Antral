@@ -63,12 +63,6 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-
-    unrestrictedMode: {
-      type: Boolean,
-      default: false,
-      description: "Allow agent to bypass tool scope restrictions when enabled",
-    },
   },
   {
     timestamps: true,

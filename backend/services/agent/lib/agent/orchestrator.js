@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import { AgentRun } from "../../models/agentRun.model.js";
 import { availableTools } from "./tools/index.js";
-import { LOCAL_COMPUTER_TARGET_ENABLED } from "../policies.js";
+import { LOCAL_COMPUTER_TARGET_ENABLED, effectiveScopes } from "../policies.js";
 import { chat, toToolSchemas, resolveProvider, isTooLarge } from "./llm.js";
 import { executeToolCall } from "./executor.js";
 import { redactSecrets } from "./redact.js";
@@ -25,12 +25,10 @@ const AGENT = "orchestrator";
 // In-memory handles for runs executing in this process (for cancellation).
 const active = new Map(); // runId -> AbortController
 
-const systemPrompt = ({ target, tools, summary, unrestrictedMode }) => {
+const systemPrompt = ({ target, tools, summary }) => {
   const noSystemTools = !tools.some((t) => t.scope !== null);
   const computerTarget = target.type === "computer";
-  return `You are Antral, an AI operator working on the user's own computer and projects.${
-    unrestrictedMode ? "\n\n⚠️ UNRESTRICTED MODE ENABLED — you can use any available tool without scope restrictions. All actions are still logged for audit." : ""
-  }
+  return `You are Antral, an AI operator working on the user's own computer and projects.
 
 Your main specialty is cybersecurity: finding weaknesses in the user's code, dependencies, configuration and system, explaining them, and showing how to fix them. You can also handle general tasks (understanding a codebase, debugging, answering questions about a project) with the same care.
 
@@ -43,7 +41,7 @@ How to work:
 - Stay inside the authorized target. Never try to get around a refused or denied action. Report it instead.
 - Inspect before changing anything. Changes and commands always pause for approval on This PC; other targets follow their saved target rules. Keep each change small and purposeful, and explain it.
 - If the user declines an action, don't retry it. Find another way, or explain the change so they can make it themselves.
-- ${computerTarget ? "On This PC, never use saved always-allow rules to skip approvals. For file tools, use absolute local paths from the drive listing." : "Stay within the authorized target for every action."}
+- ${computerTarget ? "Global (This PC) grants you every permission on all local drives, but each change or command still needs the user's approval. Never use saved always-allow rules to skip approvals. For file tools, use absolute local paths from the drive listing." : "Stay within the authorized target for every action."}
 - Only make the changes the task calls for. Never delete or overwrite work you didn't create unless the user asked. Prefer edit_file over rewriting whole files.
 - After changing code, verify it (run the tests or build, or re-read the file) and fix anything you broke.
 - For Android phone tasks, use the registered Android tools and inspect the screen before acting. Never use shell or another tool to bypass their supported operations or access phone files.
@@ -96,7 +94,7 @@ const chatWithin = async (fit, send) => {
   }
 };
 
-const loop = async (run, { tools, root, signal, limits, history, toolsUsed, attachments, unrestrictedMode }) => {
+const loop = async (run, { tools, root, signal, limits, history, toolsUsed, attachments }) => {
   const toolSchemas = toToolSchemas(tools);
   const ctx = {
     root,
@@ -107,7 +105,7 @@ const loop = async (run, { tools, root, signal, limits, history, toolsUsed, atta
     authorizationId: run.authorizationId,
   };
   let messages = [
-    { role: "system", content: systemPrompt({ target: run.target, tools, summary: history.summary, unrestrictedMode }) },
+    { role: "system", content: systemPrompt({ target: run.target, tools, summary: history.summary }) },
     ...history.messages,
     {
       role: "user",
@@ -223,15 +221,14 @@ const remember = async (run, { answer, toolsUsed, limits }) => {
 };
 
 // Creates the run record and starts the loop in the background.
-export const startRun = async ({ userUid, authorization, target, task, disabledScopes, conversationId, attachments = [], unrestrictedMode = false }) => {
+export const startRun = async ({ userUid, authorization, target, task, disabledScopes, conversationId, attachments = [] }) => {
   const provider = resolveProvider(); // fail fast if no LLM is configured
   const limits = limitsFor(AGENT, provider.name);
 
   const tools = availableTools({
     targetType: target.type,
-    grantedScopes: authorization.scopes,
+    grantedScopes: effectiveScopes(authorization),
     disabledScopes,
-    unrestrictedMode,
   });
   // With every system capability off, the run still starts: the user may be
   // asking the agent to turn a permission back on, and the prompt explains
@@ -274,7 +271,7 @@ export const startRun = async ({ userUid, authorization, target, task, disabledS
   active.set(String(run._id), controller);
   const toolsUsed = [];
 
-  loop(run, { tools, root, signal: controller.signal, limits, history, toolsUsed, attachments, unrestrictedMode })
+  loop(run, { tools, root, signal: controller.signal, limits, history, toolsUsed, attachments })
     .then(async (result) => {
       const clean = redactSecrets(result);
       await logStep(run._id, { kind: "final", content: clean });

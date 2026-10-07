@@ -71,36 +71,3 @@ export const saveProfile = async (req, res) => {
 
   return res.json({ profile: { firstName, lastName, dateOfBirth } });
 };
-
-export const getUnrestrictedMode = async (req, res) => {
-  try {
-    const user = await User.findOne({ firebaseUid: req.session.uid }).select("unrestrictedMode");
-    return res.json({ unrestrictedMode: user?.unrestrictedMode || false });
-  } catch (error) {
-    return res.status(500).json({ message: "Could not fetch unrestricted mode setting." });
-  }
-};
-
-export const setUnrestrictedMode = async (req, res) => {
-  const enabled = req.body?.enabled === true;
-  if (typeof req.body?.enabled !== "boolean") {
-    return res.status(400).json({ message: "enabled must be a boolean." });
-  }
-
-  try {
-    const user = await User.findOneAndUpdate(
-      { firebaseUid: req.session.uid },
-      { $set: { unrestrictedMode: enabled } },
-      { returnDocument: "after" }
-    );
-    if (!user) {
-      return res.status(404).json({ message: "User not found." });
-    }
-    return res.json({
-      unrestrictedMode: user.unrestrictedMode,
-      message: `Unrestricted mode ${enabled ? "enabled" : "disabled"}.`
-    });
-  } catch (error) {
-    return res.status(500).json({ message: "Could not update unrestricted mode setting." });
-  }
-};

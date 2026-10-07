@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSelector } from 'react-redux'
 import { signOut } from 'firebase/auth'
 import { auth } from '../../../utils/firebase.js'
 import Icon from '../ui/Icon.jsx'
-import { Button, Card, ConfirmDialog } from '../ui/primitives.jsx'
+import { Button, Card, ConfirmDialog, Switch } from '../ui/primitives.jsx'
 import { useToast } from '../ui/toast.js'
 import { SettingsSection } from './SettingsSection.jsx'
 
@@ -19,6 +19,59 @@ function AccountSettings({ initials, userName }) {
   const toast = useToast()
   const [confirm, setConfirm] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [unrestrictedMode, setUnrestrictedMode] = useState(false)
+  const [loadingMode, setLoadingMode] = useState(false)
+  const [fetchingMode, setFetchingMode] = useState(true)
+
+  // Fetch current unrestricted mode status on mount
+  useEffect(() => {
+    const fetchUnrestrictedMode = async () => {
+      try {
+        const response = await fetch('/auth/unrestricted-mode')
+        if (response.ok) {
+          const data = await response.json()
+          setUnrestrictedMode(data.unrestrictedMode)
+        }
+      } catch (error) {
+        console.error('Failed to fetch unrestricted mode:', error)
+        toast({ tone: 'error', message: 'Could not load unrestricted mode setting.' })
+      } finally {
+        setFetchingMode(false)
+      }
+    }
+
+    fetchUnrestrictedMode()
+  }, [toast])
+
+  const toggleUnrestrictedMode = async () => {
+    const newValue = !unrestrictedMode
+    setLoadingMode(true)
+    try {
+      const response = await fetch('/auth/unrestricted-mode', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: newValue }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setUnrestrictedMode(data.unrestrictedMode)
+        toast({
+          tone: 'success',
+          message: data.message || `Unrestricted mode ${newValue ? 'enabled' : 'disabled'}.`,
+        })
+      } else {
+        setUnrestrictedMode(!newValue)
+        toast({ tone: 'error', message: 'Failed to update unrestricted mode.' })
+      }
+    } catch (error) {
+      setUnrestrictedMode(!newValue)
+      console.error('Failed to toggle unrestricted mode:', error)
+      toast({ tone: 'error', message: 'Could not update unrestricted mode.' })
+    } finally {
+      setLoadingMode(false)
+    }
+  }
 
   const logout = async () => {
     setBusy(true)
@@ -50,6 +103,25 @@ function AccountSettings({ initials, userName }) {
           Sign out
         </Button>
       </Card>
+
+      <div>
+        <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-400">Agent capabilities</h3>
+        <Card className="flex items-center justify-between px-4 py-3.5">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-white">Unrestricted mode</p>
+            <p className="mt-0.5 text-xs text-neutral-400">
+              Allow agent to use all tools without scope restrictions
+            </p>
+          </div>
+          <Switch
+            on={unrestrictedMode}
+            onChange={toggleUnrestrictedMode}
+            disabled={loadingMode || fetchingMode}
+            pending={loadingMode}
+            label="Toggle unrestricted mode"
+          />
+        </Card>
+      </div>
 
       <div>
         <h3 className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-400">Keyboard shortcuts</h3>

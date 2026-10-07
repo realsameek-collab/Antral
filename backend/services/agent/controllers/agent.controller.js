@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
+import axios from "axios";
 import { AgentRun } from "../models/agentRun.model.js";
 import { listTools, publicTool } from "../lib/agent/tools/index.js";
 import { TargetAuthorization } from "../models/consent.model.js";
-import User from "../../auth/models/user.model.js";
 import { startRun, cancelRun, isRunActive } from "../lib/agent/orchestrator.js";
 import { DECISIONS, resolveApproval } from "../lib/agent/approvals.js";
 import {
@@ -41,9 +41,20 @@ export const createRun = async (req, res, next) => {
       return res.status(409).json({ message: "An agent run is already in progress. Wait for it or cancel it first." });
     }
 
-    // Fetch unrestricted mode setting from user account
-    const user = await User.findOne({ firebaseUid: req.user.uid }).select("unrestrictedMode").lean();
-    const unrestrictedMode = user?.unrestrictedMode || false;
+    // Fetch unrestricted mode setting from auth service
+    let unrestrictedMode = false;
+    try {
+      const authServiceUrl = process.env.AUTH_SERVICE_URL || "http://localhost:3001";
+      const sessionCookie = req.headers.cookie || "";
+      const response = await axios.get(`${authServiceUrl}/unrestricted-mode`, {
+        headers: { cookie: sessionCookie },
+        timeout: 5000,
+      });
+      unrestrictedMode = response.data?.unrestrictedMode || false;
+    } catch (error) {
+      console.warn("Could not fetch unrestricted mode, defaulting to false:", error.message);
+      // Continue with unrestrictedMode = false if auth service call fails
+    }
 
     // Continue an existing conversation (same target), or start a new one.
     let conversationId = req.body?.conversationId;

@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { AgentRun } from "../models/agentRun.model.js";
 import { listTools, publicTool } from "../lib/agent/tools/index.js";
 import { TargetAuthorization } from "../models/consent.model.js";
+import User from "../../auth/models/user.model.js";
 import { startRun, cancelRun, isRunActive } from "../lib/agent/orchestrator.js";
 import { DECISIONS, resolveApproval } from "../lib/agent/approvals.js";
 import {
@@ -40,6 +41,10 @@ export const createRun = async (req, res, next) => {
       return res.status(409).json({ message: "An agent run is already in progress. Wait for it or cancel it first." });
     }
 
+    // Fetch unrestricted mode setting from user account
+    const user = await User.findOne({ firebaseUid: req.user.uid }).select("unrestrictedMode").lean();
+    const unrestrictedMode = user?.unrestrictedMode || false;
+
     // Continue an existing conversation (same target), or start a new one.
     let conversationId = req.body?.conversationId;
     if (conversationId !== undefined && conversationId !== null) {
@@ -63,6 +68,7 @@ export const createRun = async (req, res, next) => {
       attachments,
       disabledScopes: req.accountConsent?.disabledCapabilities || [],
       conversationId,
+      unrestrictedMode,
     });
     return res.status(202).json({
       run: { id: run._id, conversationId, status: run.status, toolsOffered: run.toolsOffered },

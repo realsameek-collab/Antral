@@ -25,10 +25,12 @@ const AGENT = "orchestrator";
 // In-memory handles for runs executing in this process (for cancellation).
 const active = new Map(); // runId -> AbortController
 
-const systemPrompt = ({ target, tools, summary }) => {
+const systemPrompt = ({ target, tools, summary, unrestrictedMode }) => {
   const noSystemTools = !tools.some((t) => t.scope !== null);
   const computerTarget = target.type === "computer";
-  return `You are Antral, an AI operator working on the user's own computer and projects.
+  return `You are Antral, an AI operator working on the user's own computer and projects.${
+    unrestrictedMode ? "\n\n⚠️ UNRESTRICTED MODE ENABLED — you can use any available tool without scope restrictions. All actions are still logged for audit." : ""
+  }
 
 Your main specialty is cybersecurity: finding weaknesses in the user's code, dependencies, configuration and system, explaining them, and showing how to fix them. You can also handle general tasks (understanding a codebase, debugging, answering questions about a project) with the same care.
 
@@ -94,7 +96,7 @@ const chatWithin = async (fit, send) => {
   }
 };
 
-const loop = async (run, { tools, root, signal, limits, history, toolsUsed, attachments }) => {
+const loop = async (run, { tools, root, signal, limits, history, toolsUsed, attachments, unrestrictedMode }) => {
   const toolSchemas = toToolSchemas(tools);
   const ctx = {
     root,
@@ -105,7 +107,7 @@ const loop = async (run, { tools, root, signal, limits, history, toolsUsed, atta
     authorizationId: run.authorizationId,
   };
   let messages = [
-    { role: "system", content: systemPrompt({ target: run.target, tools, summary: history.summary }) },
+    { role: "system", content: systemPrompt({ target: run.target, tools, summary: history.summary, unrestrictedMode }) },
     ...history.messages,
     {
       role: "user",
@@ -221,7 +223,7 @@ const remember = async (run, { answer, toolsUsed, limits }) => {
 };
 
 // Creates the run record and starts the loop in the background.
-export const startRun = async ({ userUid, authorization, target, task, disabledScopes, conversationId, attachments = [] }) => {
+export const startRun = async ({ userUid, authorization, target, task, disabledScopes, conversationId, attachments = [], unrestrictedMode = false }) => {
   const provider = resolveProvider(); // fail fast if no LLM is configured
   const limits = limitsFor(AGENT, provider.name);
 
@@ -229,6 +231,7 @@ export const startRun = async ({ userUid, authorization, target, task, disabledS
     targetType: target.type,
     grantedScopes: authorization.scopes,
     disabledScopes,
+    unrestrictedMode,
   });
   // With every system capability off, the run still starts: the user may be
   // asking the agent to turn a permission back on, and the prompt explains
@@ -271,7 +274,7 @@ export const startRun = async ({ userUid, authorization, target, task, disabledS
   active.set(String(run._id), controller);
   const toolsUsed = [];
 
-  loop(run, { tools, root, signal: controller.signal, limits, history, toolsUsed, attachments })
+  loop(run, { tools, root, signal: controller.signal, limits, history, toolsUsed, attachments, unrestrictedMode })
     .then(async (result) => {
       const clean = redactSecrets(result);
       await logStep(run._id, { kind: "final", content: clean });

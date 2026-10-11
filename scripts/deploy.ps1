@@ -12,9 +12,8 @@ Set-Location $root
 Write-Host "==> Pulling latest code" -ForegroundColor Cyan
 git pull --ff-only
 
-# Install dependencies only where package-lock changed would be ideal, but a
-# plain install each time is simple and safe. npm ci needs a lockfile; fall back
-# to npm install if one is missing.
+# Install dependencies. npm ci needs a lockfile; fall back to npm install if
+# one is missing.
 function Install-Deps($dir) {
   Write-Host "==> Installing deps: $dir" -ForegroundColor Cyan
   Push-Location (Join-Path $root $dir)
@@ -37,7 +36,7 @@ Write-Host "==> Reloading services (PM2)" -ForegroundColor Cyan
 # reload = zero-downtime; starts them if not already running.
 pm2 reload ecosystem.config.cjs --update-env
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "reload failed (first run?) — starting fresh" -ForegroundColor Yellow
+  Write-Host "reload failed (first run?) - starting fresh" -ForegroundColor Yellow
   pm2 start ecosystem.config.cjs
 }
 pm2 save

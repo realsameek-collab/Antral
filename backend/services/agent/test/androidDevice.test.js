@@ -12,18 +12,21 @@ test("only authorized physical USB-style serials can be controlled", () => {
   assert.equal(isUsbDeviceSerial("emulator-5554"), false);
   assert.equal(isUsbDeviceSerial("192.168.1.8:5555"), false);
   assert.equal(isUsbDeviceSerial("bad;serial"), false);
+  assert.equal(isUsbDeviceSerial("adb-19301FDEE003AS-abc._adb-tls-connect._tcp"), false);
 });
 
 test("device listing preserves ADB state and control eligibility", () => {
   const devices = parseDevicesOutput(
-    "List of devices attached\nABC123 device usb:1-1 product:pixel model:Pixel_8\nOLDADB device product:pixel\nemulator-5554 device\nXYZ unauthorized usb:1-2\n",
+    "List of devices attached\nABC123 device usb:1-1 product:pixel model:Pixel_8\nNOUSB device product:bluejay model:Pixel_6a transport_id:1\nemulator-5554 device\n192.168.1.8:5555 device product:x\nXYZ unauthorized usb:1-2\n",
   );
   assert.deepEqual(
     devices.map(({ serial, state, canControl }) => ({ serial, state, canControl })),
     [
       { serial: "ABC123", state: "device", canControl: true },
-      { serial: "OLDADB", state: "device", canControl: false },
+      // ADB 37 on Windows omits `usb:`; a plain hardware serial is still USB.
+      { serial: "NOUSB", state: "device", canControl: true },
       { serial: "emulator-5554", state: "device", canControl: false },
+      { serial: "192.168.1.8:5555", state: "device", canControl: false },
       { serial: "XYZ", state: "unauthorized", canControl: false },
     ],
   );

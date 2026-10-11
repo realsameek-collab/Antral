@@ -47,7 +47,20 @@ const start = async () => {
   await redis.connect();
   await connectDb();
   await markInterruptedRuns().catch((e) => console.error("Could not mark interrupted runs:", e.message));
-  const listening = () => console.log(`agent service is running on port ${port}`);
+  const listening = () => {
+    console.log(`agent service is running on port ${port}`);
+    if (LOCAL_COMPUTER_TARGET_ENABLED) {
+      console.log("  mode: DESKTOP (ANTRAL_LOCAL_DESKTOP=1) — Global (This PC) is available.");
+    } else {
+      console.warn(
+        "\n  ⚠  mode: NON-DESKTOP (ANTRAL_LOCAL_DESKTOP is not set).\n" +
+          "     Global (This PC) is DISABLED and will be hidden in the target selector;\n" +
+          '     switching to Global will fail with "available only in the local desktop app".\n' +
+          "     If you want Global, stop this and start the whole stack with:  npm run desktop\n" +
+          "     (Do not start the dev services alongside it — the flagless agent here would answer instead.)\n",
+      );
+    }
+  };
   if (LOCAL_COMPUTER_TARGET_ENABLED) app.listen(port, "127.0.0.1", listening);
   else app.listen(port, listening);
 };

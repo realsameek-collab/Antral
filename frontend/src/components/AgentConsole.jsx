@@ -32,7 +32,7 @@ const MAX_IMAGES = 3
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_TOTAL_IMAGE_BYTES = 15 * 1024 * 1024
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp']
-const PERMISSION_TOOLS = /^(turn_(on|off)_permission|add_project)$/
+const PERMISSION_TOOLS = /^(turn_(on|off)_permission|add_project|switch_to_global)$/
 
 const VIEW_TITLES = { dashboard: 'Dashboard', chat: 'Chat', images: 'Images', settings: 'Settings' }
 
@@ -232,10 +232,11 @@ function AgentConsole({ profile }) {
   }, [galleryArchive, thread, liveRun])
 
   // The target this chat talks to: the conversation's own target once it has
-  // one, otherwise the user's pick (default: the first authorized target).
+  // one, otherwise the user's pick (default: Global (This PC) when it is
+  // authorized, else the first authorized target).
   const selected = conversationTarget
     ? targets.find((a) => a.target.type === conversationTarget.type && a.target.identifier === conversationTarget.identifier) || null
-    : targets.find((a) => a.id === targetId) || targets[0] || null
+    : targets.find((a) => a.id === targetId) || targets.find((a) => a.target.type === 'computer') || targets[0] || null
 
   const refreshConversations = useCallback(() => {
     listConversations()
@@ -300,7 +301,7 @@ function AgentConsole({ profile }) {
           permissionSteps.current = changed
           const refreshed = dispatch(refreshConsent())
           // The agent added a project and moved this chat into it: follow it there.
-          if ((run.steps || []).some((s) => s.kind === 'tool_result' && s.ok && s.tool === 'add_project')) {
+          if ((run.steps || []).some((s) => s.kind === 'tool_result' && s.ok && /^(add_project|switch_to_global)$/.test(s.tool))) {
             Promise.all([refreshed, getConversation(run.conversationId)])
               .then(([, { conversation }]) => {
                 if (conversationIdRef.current === conversation.id) setConversationTarget(conversation.target)
@@ -312,6 +313,15 @@ function AgentConsole({ profile }) {
 
         if (!ACTIVE.includes(run.status)) {
           setThread((t) => t.map((r) => (r._id === run._id ? { ...run, attachments: r.attachments || [] } : r)))
+          // The chat switched to Global and the request continues in a new run.
+          if (run.continuedBy) {
+            const { run: next } = await getRun(run.continuedBy)
+            if (conversationIdRef.current === next.conversationId) {
+              setConversationTarget(next.target)
+              setThread((t) => (t.some((r) => r._id === next._id) ? t : [...t, next]))
+              setLiveRun(next)
+            }
+          }
           refreshConversations()
           dispatch(refreshConsent())
         }
@@ -342,7 +352,8 @@ function AgentConsole({ profile }) {
 
   const newChat = useCallback(
     (prompt, projectId) => {
-      if (projectId) setTargetId(projectId)
+      // A plain "new chat" starts on the default target (Global when authorized).
+      setTargetId(projectId || '')
       setConversationId(null)
       setConversationTarget(null)
       setThread([])
@@ -819,8 +830,7 @@ function AgentConsole({ profile }) {
                     setAuthorizingComputer(true)
                     return
                   }
-                  setTargetId(e.target.value)
-                  newChat()
+                  newChat(undefined, e.target.value)
                 }}
                 disabled={
                   Boolean(conversationId) ||

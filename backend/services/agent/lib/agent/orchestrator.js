@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import { AgentRun } from "../../models/agentRun.model.js";
+import { AccountConsent } from "../../models/consent.model.js";
 import { availableTools } from "./tools/index.js";
 import { LOCAL_COMPUTER_TARGET_ENABLED, effectiveScopes } from "../policies.js";
 import { chat, toToolSchemas, resolveProvider, isTooLarge } from "./llm.js";
@@ -41,10 +42,11 @@ How to work:
 - Stay inside the authorized target. Never try to get around a refused or denied action. Report it instead.
 - Inspect before changing anything. Changes and commands always pause for approval on This PC; other targets follow their saved target rules. Keep each change small and purposeful, and explain it.
 - If the user declines an action, don't retry it. Find another way, or explain the change so they can make it themselves.
-- ${computerTarget ? "Global (This PC) grants you every permission on all local drives, but each change or command still needs the user's approval. Never use saved always-allow rules to skip approvals. For file tools, use absolute local paths from the drive listing." : "Stay within the authorized target for every action."}
+- ${computerTarget ? "Global (This PC) grants you every permission on all local drives, but each change or command still needs the user's approval. Never use saved always-allow rules to skip approvals. For file tools, use absolute local paths from the drive listing." : "Stay within the authorized target for every action. If the request needs the rest of the computer (installed applications, other folders, running programs), don't guess typical paths and don't send the user to search manually: say in one sentence that this chat is limited to its folder, and that switching the chat's target to Global (This PC) lets you find and do it directly."}
 - Only make the changes the task calls for. Never delete or overwrite work you didn't create unless the user asked. Prefer edit_file over rewriting whole files.
 - After changing code, verify it (run the tests or build, or re-read the file) and fix anything you broke.
-- For Android phone tasks, use the registered Android tools and inspect the screen before acting. Never use shell or another tool to bypass their supported operations or access phone files.
+- To open an application, call find_application first and launch only a candidate it returned. If several fit (e.g. two versions), ask which one. To open a project in an app, find it with find_projects and pass it as an argument (Godot: ["--editor", "--path", <folder>]). To close a program, get its exact PID from list_processes and use close_application; never force-close unless a graceful close failed and the user agrees. Never invent paths, PIDs or results — say "launched" only if the tool confirmed a process or window.
+- For Android phone tasks, run android_diagnose first when anything fails, use the registered Android tools and inspect the screen before acting. If a task needs something ADB cannot do (unlocking the phone, an AccessibilityService, app-internal permissions), say exactly what is missing instead of pretending it worked. Never use shell or another tool to bypass their supported operations or access phone files.
 - Credentials in tool output are masked. Report where a secret is (file:line) and what kind it is. Never try to recover its value.
 
 Permissions:
@@ -94,7 +96,7 @@ const chatWithin = async (fit, send) => {
   }
 };
 
-const loop = async (run, { tools, root, signal, limits, history, toolsUsed, attachments }) => {
+const loop = async (run, { tools, root, signal, limits, history, toolsUsed, attachments, handoff }) => {
   const toolSchemas = toToolSchemas(tools);
   const ctx = {
     root,
@@ -103,6 +105,7 @@ const loop = async (run, { tools, root, signal, limits, history, toolsUsed, atta
     userUid: run.userUid,
     conversationId: run.conversationId,
     authorizationId: run.authorizationId,
+    handoff,
   };
   let messages = [
     { role: "system", content: systemPrompt({ target: run.target, tools, summary: history.summary }) },
@@ -138,6 +141,18 @@ const loop = async (run, { tools, root, signal, limits, history, toolsUsed, atta
     }
   };
 
+  // Streams the model's visible text into run.result as it is generated, so the
+  // UI (which polls run.result) shows the answer fill in instead of waiting for
+  // the whole turn. Writes are throttled and redacted; finishRun sets the final
+  // result, so a partial flush that never lands is harmless.
+  let lastFlush = 0;
+  const onToken = (text) => {
+    const now = Date.now();
+    if (now - lastFlush < 500) return;
+    lastFlush = now;
+    AgentRun.updateOne({ _id: run._id }, { $set: { result: redactSecrets(text) } }).catch(() => {});
+  };
+
   for (let turn = 0; turn < limits.maxTurns; turn += 1) {
     if (signal.aborted) throw new Error("cancelled");
     const { message, usage, provider, model } = await chatWithin(fit, () =>
@@ -146,6 +161,7 @@ const loop = async (run, { tools, root, signal, limits, history, toolsUsed, atta
         tools: toolSchemas,
         signal,
         maxTokens: limits.maxOutputTokens,
+        onToken,
       }),
     );
     // Record which provider actually answered (it changes after a silent failover).
@@ -199,7 +215,7 @@ const loop = async (run, { tools, root, signal, limits, history, toolsUsed, atta
     content: "You have reached the step limit. Give your final answer now from what you have found, and note anything left unchecked.",
   });
   const { message } = await chatWithin(fit, () =>
-    chat({ messages: toProviderMessages(messages), signal, maxTokens: limits.maxOutputTokens }),
+    chat({ messages: toProviderMessages(messages), signal, maxTokens: limits.maxOutputTokens, onToken }),
   );
   return message.content || "(no answer)";
 };
@@ -270,13 +286,33 @@ export const startRun = async ({ userUid, authorization, target, task, disabledS
   const controller = new AbortController();
   active.set(String(run._id), controller);
   const toolsUsed = [];
+  const handoff = {}; // set by switch_to_global
 
-  loop(run, { tools, root, signal: controller.signal, limits, history, toolsUsed, attachments })
+  loop(run, { tools, root, signal: controller.signal, limits, history, toolsUsed, attachments, handoff })
     .then(async (result) => {
       const clean = redactSecrets(result);
       await logStep(run._id, { kind: "final", content: clean });
-      await finishRun(run._id, { status: "completed", result: clean });
       await remember(run, { answer: clean, toolsUsed, limits });
+      // The chat moved to Global: carry on with the same request there, so the
+      // user doesn't have to repeat it. The UI follows `continuedBy`.
+      let continuedBy = null;
+      if (handoff.authorization && !controller.signal.aborted) {
+        try {
+          const consent = await AccountConsent.findOne({ userUid });
+          const next = await startRun({
+            userUid,
+            authorization: handoff.authorization,
+            target: handoff.authorization.target,
+            task,
+            disabledScopes: consent?.disabledCapabilities || [],
+            conversationId,
+          });
+          continuedBy = String(next._id);
+        } catch (error) {
+          await logStep(run._id, { kind: "error", content: `Could not continue on Global: ${error.message}` });
+        }
+      }
+      await finishRun(run._id, { status: "completed", result: clean, ...(continuedBy ? { continuedBy } : {}) });
     })
     .catch(async (error) => {
       const cancelled = controller.signal.aborted;

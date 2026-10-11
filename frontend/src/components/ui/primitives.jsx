@@ -75,7 +75,7 @@ export function StatusPill({ status }) {
 
 // Modal dialog: closes on Escape and backdrop click, moves focus inside on
 // open and restores it on close.
-export function Modal({ open, onClose, title, description, children, footer, size = 'md', labelledBy }) {
+export function Modal({ open, onClose, title, description, children, footer, size = 'md', labelledBy, contentClassName = 'min-h-0 flex-1 overflow-y-auto' }) {
   const panelRef = useRef(null)
   const titleId = useId()
   const onCloseRef = useRef(onClose)
@@ -157,7 +157,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
             </button>
           </header>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        <div className={contentClassName}>{children}</div>
         {footer && <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-white/[0.07] px-6 py-4">{footer}</footer>}
       </section>
     </div>

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { AgentRun } from "../models/agentRun.model.js";
-import { listTools, publicTool } from "../lib/agent/tools/index.js";
+import { getTool, listTools, publicTool } from "../lib/agent/tools/index.js";
 import { TargetAuthorization } from "../models/consent.model.js";
 import { startRun, cancelRun, isRunActive } from "../lib/agent/orchestrator.js";
 import { DECISIONS, resolveApproval } from "../lib/agent/approvals.js";
@@ -255,4 +255,17 @@ export const getLimits = (_req, res) => {
     provider = undefined;
   }
   res.json({ limits: { orchestrator: limitsFor("orchestrator", provider) } });
+};
+
+// Connected-device status for the settings UI. Read-only: same data as the
+// android_diagnose tool, plus whether this host can automate Windows.
+export const getDeviceStatus = async (_req, res) => {
+  const windows = { available: process.platform === "win32" };
+  let android;
+  try {
+    android = await getTool("android_diagnose").run({}, {});
+  } catch (error) {
+    android = { problem: error.message };
+  }
+  res.json({ windows, android });
 };

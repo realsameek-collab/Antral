@@ -33,3 +33,5 @@ export const removeAlwaysAllow = (authorizationId, rule) =>
 
 // Deletes a project: revokes its authorization and forgets all of its chats.
 export const deleteProject = (authorizationId) => request(`/agent/projects/${authorizationId}`, { method: "DELETE" });
+
+export const getDeviceStatus = () => request("/agent/devices");

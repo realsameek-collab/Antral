@@ -9,5 +9,6 @@ import "./web.js";
 import "./permissions.js";
 import "./projects.js";
 import "./android.js";
+import "./apps.js";
 
 export * from "./registry.js";

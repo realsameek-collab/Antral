@@ -6,7 +6,7 @@ const MAX_OUTPUT_CHARS = 30_000;
 // combined output. Killed on timeout or when `signal` aborts.
 export const runPowerShell = (
   command,
-  { cwd, signal, timeoutMs = 60_000, executionPolicy = "Restricted" },
+  { cwd, signal, timeoutMs = 60_000, executionPolicy = "Restricted", maxOutputChars = MAX_OUTPUT_CHARS },
 ) =>
   new Promise((resolve, reject) => {
     if (process.platform !== "win32") {
@@ -25,7 +25,7 @@ export const runPowerShell = (
     let out = "";
     let truncated = false;
     const append = (chunk) => {
-      if (out.length >= MAX_OUTPUT_CHARS) {
+      if (out.length >= maxOutputChars) {
         truncated = true;
         return;
       }
@@ -52,7 +52,7 @@ export const runPowerShell = (
     child.on("close", (code) => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      const body = out.slice(0, MAX_OUTPUT_CHARS).trimEnd() || "(no output)";
+      const body = out.slice(0, maxOutputChars).trimEnd() || "(no output)";
       const notes = [
         truncated ? "… output truncated" : "",
         timedOut ? `… stopped after ${Math.round(timeoutMs / 1000)}s timeout` : "",

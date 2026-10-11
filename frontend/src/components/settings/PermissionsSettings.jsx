@@ -6,6 +6,7 @@ import { useToast } from '../ui/toast.js'
 import { setDisabledCapabilities } from '../../store/consentSlice.js'
 import { RISK_GROUP, RISK_ORDER, SCOPE_ICON } from './scopeMeta.js'
 import { SettingsSection, NeedsPolicies } from './SettingsSection.jsx'
+import DeviceStatus from './DeviceStatus.jsx'
 
 // Account-wide kill-switches. A capability turned off here is blocked for
 // every target, even where it was granted.
@@ -83,6 +84,8 @@ function PermissionsSettings({ onNavigate }) {
           turning something on always asks you to confirm first.
         </p>
       </Card>
+
+      <DeviceStatus />
 
       <div className="flex items-center justify-between px-1 text-xs text-neutral-500">
         <span>

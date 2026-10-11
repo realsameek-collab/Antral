@@ -33,6 +33,9 @@ const agentRunSchema = new mongoose.Schema(
     // Conversation (Redis memory) this run belongs to.
     conversationId: { type: String, required: true, index: true },
     task: { type: String, required: true, maxlength: 4000 },
+    // Set when this run switched the chat to Global and a follow-up run
+    // continued the same request there.
+    continuedBy: { type: String, default: null },
     // Context window: the agent's budget and the latest prompt size reported
     // by the provider.
     contextLimit: { type: Number, default: 0 },

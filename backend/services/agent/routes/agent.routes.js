@@ -19,6 +19,7 @@ import {
   deleteConversationHandler,
   getLimits,
   deleteProjectHandler,
+  getDeviceStatus,
 } from "../controllers/agent.controller.js";
 
 const router = Router();
@@ -27,6 +28,7 @@ router.use(attachUser);
 
 router.get("/tools", getTools);
 router.get("/limits", getLimits);
+router.get("/devices", getDeviceStatus);
 
 // Conversation memory (Redis). POST /runs with a conversationId continues one.
 router.get("/conversations", listConversationsHandler);

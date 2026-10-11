@@ -8,6 +8,8 @@ export const SCOPE_ICON = {
   modify_files: 'doc',
   execute_powershell: 'terminal',
   android_device: 'device',
+  launch_applications: 'computer',
+  manage_processes: 'activity',
   browser_automation: 'external',
   background_execution: 'clock',
 }

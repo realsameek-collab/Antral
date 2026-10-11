@@ -33,3 +33,19 @@ Each app launch, tap, swipe, text entry, and navigation-key press requires a
 separate approval. The Android tools do not provide arbitrary ADB commands,
 phone-file browsing, or app installation. The agent service must run on the
 same computer as ADB and the phone.
+
+## Troubleshooting
+
+Ask the agent to "diagnose my phone" (tool `android_diagnose`), or open
+Settings → Permissions → Connected devices. It reports the ADB state:
+
+- `device` — connected and authorized.
+- `unauthorized` — accept the "Allow USB debugging" prompt on the unlocked phone.
+- `offline` — reconnect the cable / toggle USB debugging.
+
+Recent ADB versions on Windows do not print `usb:` in `adb devices -l`; Antral
+identifies USB devices by serial (network `ip:port` and wireless-debugging
+serials are still refused). ADB cannot unlock the phone; apps launched while
+it is locked open behind the lock screen. Xiaomi/OPPO-family phones block
+taps and typing until "USB debugging (Security settings)" / "Disable
+permission monitoring" is enabled in Developer options.

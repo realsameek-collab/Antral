@@ -170,7 +170,8 @@ const hasImages = (messages) =>
 
 // One model turn. Returns { message, usage, provider, model }. Fails over to
 // the next provider instead of waiting; only the last one left is retried
-// patiently.
+// patiently. When `onToken` is given, the turn is streamed and `onToken` is
+// called with the full assistant text so far as it arrives.
 export const chat = async (args) => {
   const { messages, tools = [], maxTokens = 0, signal } = args;
   const chain = providerChain({ vision: hasImages(messages) });
@@ -221,27 +222,112 @@ const messagesFor = (providerName, messages) =>
     };
   });
 
-const chatOnce = async (provider, { messages, tools = [], signal, maxTokens }) => {
+// Drains a stream to a string (used to read an error body that came back as a
+// stream when the request was made with responseType: "stream").
+const drain = (stream) =>
+  new Promise((resolve) => {
+    let out = "";
+    stream.on("data", (c) => (out += c.toString("utf8")));
+    stream.on("end", () => resolve(out));
+    stream.on("error", () => resolve(out));
+  });
+
+// Parses an OpenAI-style SSE stream, accumulating assistant text and tool
+// calls. Calls onToken(fullTextSoFar) as visible text arrives. Returns the
+// same shape as a non-streamed turn.
+const consumeStream = async (stream, provider, signal, onToken) => {
+  let text = "";
+  let usage;
+  const toolCalls = [];
+  let buffer = "";
+  const handle = (payload) => {
+    if (payload === "[DONE]") return;
+    let json;
+    try {
+      json = JSON.parse(payload);
+    } catch {
+      return;
+    }
+    if (json.usage) usage = json.usage;
+    const delta = json.choices?.[0]?.delta;
+    if (!delta) return;
+    if (delta.content) {
+      text += delta.content;
+      onToken(text);
+    }
+    for (const tc of delta.tool_calls || []) {
+      const i = tc.index ?? 0;
+      const slot = (toolCalls[i] ||= { id: "", type: "function", function: { name: "", arguments: "" } });
+      if (tc.id) slot.id = tc.id;
+      if (tc.type) slot.type = tc.type;
+      if (tc.function?.name) slot.function.name += tc.function.name;
+      if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
+    }
+  };
+  await new Promise((resolve, reject) => {
+    const onAbort = () => {
+      stream.destroy();
+      reject(new Error("cancelled"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    stream.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 2);
+        if (line.startsWith("data:")) handle(line.slice(5).trim());
+      }
+    });
+    stream.on("end", () => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    });
+    stream.on("error", (e) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(e);
+    });
+  });
+  const message = {
+    role: "assistant",
+    content: text,
+    ...(toolCalls.length ? { tool_calls: toolCalls.filter(Boolean) } : {}),
+  };
+  return { message, usage, provider: provider.name, model: provider.model };
+};
+
+const chatOnce = async (provider, { messages, tools = [], signal, maxTokens, onToken }) => {
+  const streaming = typeof onToken === "function";
   try {
-    const { data } = await axios.post(
-      `${provider.baseURL}/chat/completions`,
-      {
-        model: provider.model,
-        messages: messagesFor(provider.name, messages),
-        ...(tools.length ? { tools, tool_choice: "auto" } : {}),
-        temperature: 0.2,
-        ...(maxTokens ? { max_tokens: maxTokens } : {}),
-      },
-      {
-        headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
-        timeout: 120_000,
-        signal,
-      },
-    );
+    const body = {
+      model: provider.model,
+      messages: messagesFor(provider.name, messages),
+      ...(tools.length ? { tools, tool_choice: "auto" } : {}),
+      temperature: 0.2,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
+      ...(streaming ? { stream: true, stream_options: { include_usage: true } } : {}),
+    };
+    const { data } = await axios.post(`${provider.baseURL}/chat/completions`, body, {
+      headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json" },
+      timeout: 120_000,
+      signal,
+      ...(streaming ? { responseType: "stream" } : {}),
+    });
+    if (streaming) return await consumeStream(data, provider, signal, onToken);
     const message = data?.choices?.[0]?.message;
     if (!message) throw new Error("The model returned no message.");
     return { message, usage: data.usage, provider: provider.name, model: provider.model };
   } catch (error) {
+    // A streamed request's error body comes back as a stream; read it so the
+    // retry logic and message extraction below see plain data.
+    if (streaming && error.response?.data && typeof error.response.data.on === "function") {
+      const raw = await drain(error.response.data);
+      try {
+        error.response.data = JSON.parse(raw);
+      } catch {
+        error.response.data = raw;
+      }
+    }
     // Never surface the request config (it holds the API key).
     // Keep status/headers for the retry logic; message is safe to show.
     const detail = providerMessage(error) || error.message;

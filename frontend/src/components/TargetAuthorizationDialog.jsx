@@ -77,10 +77,10 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
   }
 
   return (
-    <form onSubmit={submit} className="flex min-h-0 flex-col">
-      <div className="space-y-6 px-6 py-5">
-        <fieldset>
-          <legend className="mb-2 text-xs font-medium text-neutral-400">What should the agents work on?</legend>
+    <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6">
+        <fieldset className="sticky top-0 z-10 -mx-6 border-b border-white/[0.07] bg-[#101014] px-6 pb-3 pt-5 shadow-lg shadow-black/20">
+          <legend className="mb-2 text-xs font-medium text-neutral-300">What should the agents work on?</legend>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Target type">
             {availableTargetTypes.map((t) => (
               <button
@@ -88,6 +88,7 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
                 type="button"
                 role="radio"
                 aria-checked={t.id === targetType}
+                data-autofocus={t.id === targetType ? true : undefined}
                 onClick={() => {
                   setTargetType(t.id)
                   if (!prefill || t.id !== prefill.type) {
@@ -108,6 +109,10 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               </button>
             ))}
           </div>
+        </fieldset>
+
+        <div className="space-y-6 pb-5 pt-4">
+          <fieldset>
           {targetType === 'computer' ? (
             <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-500/[0.06] px-3.5 py-3 text-xs leading-5 text-amber-100/80">
               Global mode grants the desktop agent every permission across accessible local drives: read, edit, PowerShell, browser and more. Capabilities you turn off account-wide stay off. Files you ask it to read may be sent to your configured AI provider. Changes and all PowerShell commands require your approval every time.
@@ -120,7 +125,6 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               placeholder={typeMeta.placeholder}
               spellCheck={false}
               autoComplete="off"
-              data-autofocus
               className="w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 font-mono text-sm outline-none transition placeholder:font-sans placeholder:text-neutral-600 focus:border-indigo-400/60 focus:ring-4 focus:ring-indigo-500/10"
             />
           </label>}
@@ -135,9 +139,9 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               className="w-full rounded-xl border border-white/10 bg-black/30 px-3.5 py-2.5 text-sm outline-none transition placeholder:text-neutral-600 focus:border-indigo-400/60 focus:ring-4 focus:ring-indigo-500/10"
             />
           </label>}
-        </fieldset>
+          </fieldset>
 
-        {targetType !== 'computer' && <fieldset>
+          {targetType !== 'computer' && <fieldset>
           <legend className="mb-2 flex w-full items-baseline justify-between text-xs font-medium text-neutral-400">
             Permissions for this target
             <span className="font-normal text-neutral-600">{selectedScopes.length} selected</span>
@@ -170,9 +174,9 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
               </label>
             ))}
           </div>
-        </fieldset>}
+          </fieldset>}
 
-        <div className="space-y-3 rounded-xl border border-indigo-400/20 bg-indigo-500/[0.05] p-4">
+          <div className="space-y-3 rounded-xl border border-indigo-400/20 bg-indigo-500/[0.05] p-4">
           <label className="block">
             <span className="mb-1.5 block text-xs font-medium text-neutral-400">Basis for authorization</span>
             <select
@@ -216,20 +220,26 @@ function AuthorizationForm({ prefill, onClose, onAuthorized }) {
             </div>
           )}
           <p className="text-[11px] text-neutral-500">Authorizations last 90 days. You can change or revoke them at any time.</p>
-        </div>
+          </div>
 
-        {error && (
-          <p role="alert" className="flex items-center gap-2 rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
-            <Icon name="alert" size={15} />
-            {error}
-          </p>
-        )}
+          {error && (
+            <p role="alert" className="flex items-center gap-2 rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+              <Icon name="alert" size={15} />
+              {error}
+            </p>
+          )}
+        </div>
       </div>
 
-      <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-white/[0.07] bg-[#101014] px-6 py-4">
-        {missing && <span className="mr-auto text-xs text-neutral-500">{missing}</span>}
+      <footer className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-white/[0.07] bg-[#101014] px-6 py-4">
+        {missing && <span className="mr-auto text-xs text-indigo-200/80">{missing}</span>}
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" variant="primary" disabled={Boolean(missing) || submitting}>
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={Boolean(missing) || submitting}
+          className="disabled:bg-indigo-500/55 disabled:text-indigo-100 disabled:opacity-100"
+        >
           {submitting && <Spinner size={12} />}
           {submitting ? 'Authorizing…' : 'Authorize target'}
         </Button>
@@ -247,6 +257,8 @@ function TargetAuthorizationDialog({ open, onClose, prefill, onAuthorized }) {
       onClose={onClose}
       title={prefill?.type === 'computer' ? 'Authorize Global' : prefill ? 'Re-authorize target' : 'Authorize a target'}
       description="Confirm you may assess this target and choose what the agents are allowed to do there."
+      size="lg"
+      contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       {open && <AuthorizationForm prefill={prefill} onClose={onClose} onAuthorized={onAuthorized} />}
     </Modal>

@@ -83,6 +83,22 @@ export const SCOPES = [
     defaultOn: false,
   },
   {
+    id: "launch_applications",
+    label: "Find & open applications",
+    description:
+      "Discover installed applications on this PC and open them, or open files and projects in them. Each launch asks for your approval.",
+    risk: "elevated",
+    defaultOn: false,
+  },
+  {
+    id: "manage_processes",
+    label: "View & close running programs",
+    description:
+      "List running programs and close a specific one. Closing always asks first, tries a graceful close, and force-ends only with a second approval.",
+    risk: "high",
+    defaultOn: false,
+  },
+  {
     id: "browser_automation",
     label: "Drive a web browser",
     description:

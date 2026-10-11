@@ -1,0 +1,30 @@
+name: Deploy to personal server
+
+# Runs on YOUR laptop via a self-hosted runner (free). Every push to main makes
+# the laptop pull, rebuild and restart the app — "push and it shows up".
+#
+# IMPORTANT: this does NOT use actions/checkout. The app lives in one fixed
+# clone on the laptop (ANTRAL_DIR) that PM2 runs from; the deploy script pulls
+# into THAT clone. Set ANTRAL_DIR below to wherever you cloned the repo.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # lets you trigger a deploy by hand from the Actions tab
+
+concurrency:
+  group: deploy-personal-server
+  cancel-in-progress: false # never interrupt a deploy midway
+
+env:
+  ANTRAL_DIR: C:\antral # <-- change to your clone path on the laptop
+
+jobs:
+  deploy:
+    # This label set must match the self-hosted runner you register on the laptop.
+    runs-on: [self-hosted, windows, antral]
+    steps:
+      - name: Pull, build and restart
+        shell: powershell
+        run: |
+          Set-Location "$env:ANTRAL_DIR"
+          powershell -ExecutionPolicy Bypass -File scripts\deploy.ps1
